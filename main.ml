@@ -13,6 +13,7 @@ let compteur_var : int ref = ref 0
 let nouvelle_var () : string = compteur_var := !compteur_var + 1;
     "X"^(string_of_int !compteur_var)
 
+(* Donne la liste des variables libres dans le terme t *)
 let rec variablesLibres (t : pterm) : string list =
   match t with
   | Var x -> [x]
@@ -24,7 +25,6 @@ let rec substitution (x : string) (n: pterm) (t : pterm) : pterm =
   match t with
   | Var k -> if (k = x) then n else Var k
   | App (t1, t2) -> App(substitution x n t1, substitution x n t2)
-  (*| Abs (k, tt) -> Abs(k, substitution x n tt)*)
   | Abs (k, tt) -> if (k = x) then Abs(k, tt) else 
         if (List.mem k (variablesLibres n)) then
           let y' = nouvelle_var () in
@@ -33,6 +33,7 @@ let rec substitution (x : string) (n: pterm) (t : pterm) : pterm =
         else 
           Abs (k, substitution x n tt)
     
+(* alpha-conversion *)
 let rec alphaconv (t : pterm) : pterm = 
   match t with
   | Var x -> Var x
@@ -40,30 +41,60 @@ let rec alphaconv (t : pterm) : pterm =
   | Abs (x, tt) -> let x' = (nouvelle_var ()) in
       Abs (x', alphaconv (substitution x (Var x') tt))
 
+let rec is_value (t : pterm) : bool = 
+  match t with
+  | Var _ -> true
+  | Abs(_, _) -> true
+  | App(Var _, v) when is_value v -> true
+  | _ -> false
+
+let rec ltr_ctb_step (t : pterm) : pterm option =
+  match t with
+  | Var _ -> None
+  | Abs (_, _) -> None
+  | App(t1, t2) -> 
+      match ltr_ctb_step t1 with (* vérifier que t1 n'est pas une value? *)
+      | Some t1' -> Some (App(t1', t2))
+      | None -> match ltr_ctb_step t2 with
+                | Some t2' -> Some (App(t1, t2'))
+                | None ->   
+                  match t1, t2 with
+                  | Abs(str, t'), valeur when is_value valeur -> Some (substitution str valeur t')
+                  | _ -> None
+
+let rec ltr_cbv_norm (t : pterm) : pterm =
+  match t with
+  | Var x -> Var x
+  | Abs (x, t') -> Abs (x, t')
+  | App(t1, t2) -> match ltr_ctb_step (App(t1, t2)) with
+                    | Some t' -> ltr_cbv_norm t'
+                    | None -> App(t1, t2)
+
+(* TODO:  Ecrire ensuite une version de cette fonction qui prend en compte la divergence (par exemple avec un timeout ) 
+ https://stackoverflow.com/questions/70977947/how-to-efficiently-stop-a-function-after-a-certain-amount-of-time-in-ocaml
+ => Fin de la question 6
+*)
+
 let () =
-(* Exemple de termes à utiliser pour les tests *)
-let term1 = Abs ("x", Var "x") in
-let term2 = Abs ("x", App (Var "x", Var "y")) in
-let term3 = App (Abs ("x", Var "x"), Var "y") in
-let term4 = Abs ("y", Abs ("x", App (Var "x", Var "y"))) in
+let term1 = App (Abs ("x", Var "x"), Var "y") in
+let term2 = App (App (Abs ("x", Var "x"), Var "y"), Var "z") in
+let term3 = App (App (Abs ("x", Abs ("y", Var "x")), Var "a"), Var "b") in
+let term4 = App (App (App (Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))), Var "a"), Var "b"), Var "c") in
+let omega = App (Abs ("x", App (Var "x", Var "x")), Abs ("x", App (Var "x", Var "x"))) in
 
-(* Affichage des termes avant alpha-conversion *)
-Printf.printf "Termes avant alpha-conversion :\n";
-Printf.printf "term1 : %s\n" (print_term term1);
-Printf.printf "term2 : %s\n" (print_term term2);
-Printf.printf "term3 : %s\n" (print_term term3);
-Printf.printf "term4 : %s\n\n" (print_term term4);
+let test term name =
+  Printf.printf "%s - Avant réduction : %s\n" name (print_term term);
+  try
+    let result = ltr_cbv_norm term in
+    Printf.printf "%s - Après réduction : %s\n\n" name (print_term result)
+  with _ ->
+    Printf.printf "%s - Divergence détectée\n\n" name
+in
 
-(* Appliquons l'alpha-conversion *)
-let alpha1 = alphaconv term1 in
-let alpha2 = alphaconv term2 in
-let alpha3 = alphaconv term3 in
-let alpha4 = alphaconv term4 in
-
-(* Affichage des résultats après alpha-conversion *)
-Printf.printf "Termes après alpha-conversion :\n";
-Printf.printf "alpha1 : %s\n" (print_term alpha1);
-Printf.printf "alpha2 : %s\n" (print_term alpha2);
-Printf.printf "alpha3 : %s\n" (print_term alpha3);
-Printf.printf "alpha4 : %s\n" (print_term alpha4);
-    
+(* Exécuter chaque test *)
+test term1 "Test 1 (Identité simple)";
+test term2 "Test 2 (Double application de l'identité)";
+test term3 "Test 3 (Combinateur K)";
+test term4 "Test 4 (Combinateur S appliqué)";
+test omega "Test 5 (Application infinie Ω)";
+                  
