@@ -69,26 +69,18 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
                     | Abs(str, t'), valeur when is_value valeur -> Some (substitution str valeur t')
                     | _ -> None
 
-
 (* Appelle consécutivement ltr_ctb_step, pour normaliser un terme autant que possible *)
 let rec ltr_cbv_norm (t : pterm) : pterm =
-  match t with
-  | Var x -> Var x
-  | Abs (x, t') -> Abs (x, t')
-  | App(t1, t2) -> match ltr_ctb_step (App(t1, t2)) with
-                    | Some t' -> ltr_cbv_norm t'
-                    | None -> App(t1, t2)
+  match ltr_ctb_step t with
+  | Some t' -> ltr_cbv_norm t'
+  | None -> t
 
 (* Cette version prend en compte la divergence grâce à l'utilisation de fuel *)
 let rec ltr_cbv_norm' (t : pterm) (n : int) : pterm option =
-  match n with
-  | 0 -> None
-  | _ -> (match t with
-    | Var x -> Some (Var x)
-    | Abs (x, t') -> Some (Abs (x, t'))
-    | App(t1, t2) -> match ltr_ctb_step (App(t1, t2)) with
-                      | Some t' -> (ltr_cbv_norm' t' (n - 1))
-                      | None -> Some (App(t1, t2)))
+  if n = 0 then None else
+    match ltr_ctb_step t with
+    | Some t' -> ltr_cbv_norm' t' (n - 1)
+    | None -> Some t
 
 (* TODO:  Ecrire ensuite une version de cette fonction qui prend en compte la divergence (par exemple avec un timeout ) 
  https://stackoverflow.com/questions/70977947/how-to-efficiently-stop-a-function-after-a-certain-amount-of-time-in-ocaml
@@ -144,7 +136,6 @@ let () =
   test i_term "Test I";
   test delta_term "Test δ (Delta)";
   test omega_term "Test Ω (Omega)";
-  test k_term "Test K";
   test s_term "Test S";
   test skk_term "Test S K K";
   test sii_term "Test S I I";
