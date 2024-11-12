@@ -1,91 +1,5 @@
-
 let () =
-(* Exemple de termes à utiliser pour les tests *)
-let term1 = Abs ("x", Var "x") in
-let term2 = Abs ("x", App (Var "x", Var "y")) in
-let term3 = App (Abs ("x", Var "x"), Var "y") in
-let term4 = Abs ("y", Abs ("x", App (Var "x", Var "y"))) in
-
-(* Affichage des termes avant alpha-conversion *)
-Printf.printf "Termes avant alpha-conversion :\n";
-Printf.printf "term1 : %s\n" (print_term term1);
-Printf.printf "term2 : %s\n" (print_term term2);
-Printf.printf "term3 : %s\n" (print_term term3);
-Printf.printf "term4 : %s\n\n" (print_term term4);
-
-(* Appliquons l'alpha-conversion *)
-let alpha1 = alphaconv term1 in
-let alpha2 = alphaconv term2 in
-let alpha3 = alphaconv term3 in
-let alpha4 = alphaconv term4 in
-
-(* Affichage des résultats après alpha-conversion *)
-Printf.printf "Termes après alpha-conversion :\n";
-Printf.printf "alpha1 : %s\n" (print_term alpha1);
-Printf.printf "alpha2 : %s\n" (print_term alpha2);
-Printf.printf "alpha3 : %s\n" (print_term alpha3);
-Printf.printf "alpha4 : %s\n" (print_term alpha4);
-
-let () =
-  (* Test 1 : Application simple avec abstraction *)
-  let term1 = App (Abs ("x", Var "x"), Var "y") in
-  Printf.printf "Test 1 - Avant réduction : %s\n" (print_term term1);
-  (match ltr_ctb_step term1 with
-  | Some result -> Printf.printf "Test 1 - Après réduction : %s\n\n" (print_term result)
-  | None -> Printf.printf "Test 1 - Aucun pas de réduction possible\n\n");
-
-  (* Test 2 : Application d'une abstraction à une autre abstraction *)
-  let term2 = App (Abs ("x", App (Var "x", Var "x")), Abs ("y", Var "y")) in
-  Printf.printf "Test 2 - Avant réduction : %s\n" (print_term term2);
-  (match ltr_ctb_step term2 with
-  | Some result -> Printf.printf "Test 2 - Après réduction : %s\n\n" (print_term result)
-  | None -> Printf.printf "Test 2 - Aucun pas de réduction possible\n\n");
-
-  (* Test 3 : Application avec alpha-conversion *)
-  let term3 = App (Abs ("x", Abs ("y", App (Var "x", Var "y"))), Var "y") in
-  Printf.printf "Test 3 - Avant réduction : %s\n" (print_term term3);
-  (match ltr_ctb_step term3 with
-  | Some result -> Printf.printf "Test 3 - Après réduction : %s\n\n" (print_term result)
-  | None -> Printf.printf "Test 3 - Aucun pas de réduction possible\n\n");
-
-  (* Test 4 : Pas de réduction possible (valeurs) *)
-  let term4 = Abs ("x", App (Var "x", Var "x")) in
-  Printf.printf "Test 4 - Avant réduction : %s\n" (print_term term4);
-  (match ltr_ctb_step term4 with
-  | Some result -> Printf.printf "Test 4 - Après réduction : %s\n\n" (print_term result)
-  | None -> Printf.printf "Test 4 - Aucun pas de réduction possible\n\n");
-
-let () =
-  let term1 = App (Abs ("x", Var "x"), Var "y") in
-  let term2 = App (App (Abs ("x", Var "x"), Var "y"), Var "z") in
-  let term3 = App (App (Abs ("x", Abs ("y", Var "x")), Var "a"), Var "b") in
-  let term4 = App (App (App (Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))), Var "a"), Var "b"), Var "c") in
-  let omega = App (Abs ("x", App (Var "x", Var "x")), Abs ("x", App (Var "x", Var "x"))) in
-  
-  let test term name =
-    Printf.printf "%s - Avant réduction : %s\n" name (print_term term);
-    try
-      let result = ltr_cbv_norm term in
-      Printf.printf "%s - Après réduction : %s\n\n" name (print_term result)
-    with _ ->
-      Printf.printf "%s - Divergence détectée\n\n" name
-  in
-  
-  (* Exécuter chaque test *)
-  test term1 "Test 1 (Identité simple)";
-  test term2 "Test 2 (Double application de l'identité)";
-  test term3 "Test 3 (Combinateur K)";
-  test term4 "Test 4 (Combinateur S appliqué)";
-  test omega "Test 5 (Application infinie Ω)";
-
-  let () =
-  let term1 = App (Abs ("x", Var "x"), Var "y") in
-  let term2 = App (App (Abs ("x", Var "x"), Var "y"), Var "z") in
-  let term3 = App (App (Abs ("x", Abs ("y", Var "x")), Var "a"), Var "b") in
-  let term4 = App (App (App (Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))), Var "a"), Var "b"), Var "c") in
-  let omega = App (Abs ("x", App (Var "x", Var "x")), Abs ("x", App (Var "x", Var "x"))) in
-
-  let fuel = 100000  (* Définir le nombre maximal d'étapes de réduction *) in
+  let fuel = 10000 in
 
   let test term name =
     Printf.printf "%s - Avant réduction : %s\n" name (print_term term);
@@ -96,9 +10,115 @@ let () =
         Printf.printf "%s - Impossible de réduire le terme dans les %d étapes (divergence possible).\n\n" name fuel
   in
 
-  (* Exécuter chaque test *)
-  test term1 "Test 1 (Identité simple)";
-  test term2 "Test 2 (Double application de l'identité)";
-  test term3 "Test 3 (Combinateur K)";
-  test term4 "Test 4 (Combinateur S appliqué)";
-  test omega "Test 5 (Application infinie Ω)";
+  (* I : Identité
+    résultat attendu : λx.x 
+    donc : (fun x -> x) *)
+  let i_term = Abs ("x", Var "x") in
+
+  (* δ : auto-application
+    résultat attendu : λx. x x
+    donc : (fun x -> (x x)) *)
+  let delta_term = Abs ("x", App (Var "x", Var "x")) in
+
+  (* Ω : divergence
+    résultat attendu : (λx. x x) (λx. x x)
+    donc : divergence ou on peut aussi donner ((fun x -> (x x)) (fun x -> (x x))) *)
+  let omega_term = App (delta_term, delta_term) in
+
+  (* S
+    résultat attendu : λx. λy. λz. x z (y z)
+    donc : (fun x -> (fun y -> (fun z -> ((x z) (y z))))) *)
+  let s_term = Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))) in
+
+  (* K
+   résultat attendu : λx.λy. x
+   donc : (fun x -> (fun y -> x)) *)
+  let k_term = Abs ("x", Abs ("y", Var "x")) in
+
+  (* S K K
+    résultat attendu : λx. λy. x
+    donc : (fun z -> z) *)
+  let skk_term = App (App (s_term, k_term), k_term) in
+
+  (* S I I
+    résultat attendu : λz. z z
+    donc : (fun z -> (z z)) *)
+  let sii_term = App (App (s_term, i_term), i_term) in
+
+  (* 0 : λf.λx. x *)
+  let church_0 = Abs ("f", Abs ("x", Var "x")) in
+
+  (* 1 : λf.λx. f x *)
+  let church_1 = Abs ("f", Abs ("x", App (Var "f", Var "x"))) in
+
+  (* 2 : λf.λx. f (f x) *)
+  let church_2 = Abs ("f", Abs ("x", App (Var "f", App (Var "f", Var "x")))) in
+
+  (* 3 : λf.λx. f (f (f x)) *)
+  let church_3 = Abs ("f", Abs ("x", App (Var "f", App (Var "f", App (Var "f", Var "x"))))) in
+
+  (* Addition : λn.λm.λf.λe. n f (m f e) *)
+  let add = Abs ("n", Abs ("m", Abs ("f", Abs ("e", App (App (Var "n", Var "f"), App (App (Var "m", Var "f"), Var "e")))))) in
+
+  (* Multiplication : λn.λm.λf.λe n (m f) e *)
+  let mult = Abs ("n", Abs ("m", Abs ("f", Abs ("e", App (App (Var "n", App (Var "m", Var "f")), Var "e"))))) in
+
+  (* Puissance : λn.λm.λf.λe. (m n) f e *)
+  let power = Abs ("n", Abs ("m", Abs ("f", Abs ("e", App (App (App (Var "m", Var "n"), Var "f"), Var "e"))))) in
+
+  (* 1 + 2
+  résultat attendu : λf.λe. f (f (f x)), 
+  donc (fun f -> (fun e -> (f (f (f e))))) *)
+  let add_1_2 = App (App (add, church_1), church_2) in
+
+  (* 2 + 2
+  résultat attendu : λf.λe. f (f (f (f e)))
+  donc (fun f -> (fun e -> (f (f (f (f e)))))) *)
+  let add_2_2 = App (App (add, church_2), church_2) in
+
+  (* 1 x 2
+  résultat attendu : λf.ex. f (f e)
+  donc (fun f -> (fun e -> (f (f e)))) *)
+  let mult_1_2 = App (App (mult, church_1), church_2) in
+  
+  (* 2 x 3
+  résultat attendu : λf.λe. f (f (f (f (f (f e)))))
+  donc (fun f -> (fun e -> (f (f (f (f (f (f e)))))))) *)
+  let mult_2_3 = App (App (mult, church_2), church_3) in
+
+  (* 3 x 3
+  résultat attendu : λf.λe. f (f (f (f (f (f (f (f (f e))))))))
+  donc (fun f -> (fun e -> (f (f (f (f (f (f (f (f (f e))))))))))) *)
+  let mult_3_3 = App (App (mult, church_3), church_3) in
+  
+  (* 2^3 *)
+  (* résultat attendu : λf.λe. f (f (f (f (f (f (f (f (f e))))))))
+  donc (fun f -> (fun e -> (f (f (f (f (f (f (f (f e)))))))))) *)
+  let power_2_3 = App (App (power, church_2), church_3) in
+
+  (* Test de power 3 2 *)
+  (* résultat attendu : λf.λe. f (f (f (f (f (f (f (f (f e))))))))
+  donc (fun f -> (fun e -> (f (f (f (f (f (f (f (f (f e))))))))))) *)
+  let power_3_2 = App (App (power, church_3), church_2) in
+
+  (* 0^1 *)
+  (* résultat attendu : λf.λx. x
+  donc (fun f -> (fun x -> x)) *)
+  let power_0_1 = App (App (power, church_0), church_1) in
+
+  (* Tests *)
+  test i_term "Test I";
+  test delta_term "Test δ (Delta)";
+  test omega_term "Test Ω (Omega)";
+  test s_term "Test S";
+  test k_term "Test K";
+  test skk_term "Test S K K";
+  test sii_term "Test S I I";
+  test add_1_2 "Test 1 + 2";
+  test add_2_2 "Test 2 + 2";
+  test mult_1_2 "Test 1 x 2";
+  test mult_2_3 "Test 2 x 3";
+  test mult_3_3 "Test 3 x 3";
+  test power_2_3 "Test 2^3";
+  test power_3_2 "Test 3^2";
+  test power_0_1 "Test 0^1";
