@@ -120,6 +120,9 @@ let () =
     donc : (fun x -> (fun y -> (fun z -> ((x z) (y z))))) *)
   let s_term = Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))) in
 
+  (* K
+   résultat attendu : λx.λy. x
+   donc : (fun x -> (fun y -> x)) *)
   let k_term = Abs ("x", Abs ("y", Var "x")) in
 
   (* S K K
@@ -198,6 +201,7 @@ let () =
   test delta_term "Test δ (Delta)";
   test omega_term "Test Ω (Omega)";
   test s_term "Test S";
+  test k_term "Test K";
   test skk_term "Test S K K";
   test sii_term "Test S I I";
   test add_1_2 "Test 1 + 2";
