@@ -41,6 +41,7 @@ let rec alphaconv (t : pterm) : pterm =
   | Abs (x, tt) -> let x' = (nouvelle_var ()) in
       Abs (x', alphaconv (substitution x (Var x') tt))
 
+(* Cette foncton détermine si le terme est une valeur ("V" dans le CM 2 p.21) *)
 let rec is_value (t : pterm) : bool = 
   match t with
   | Var _ -> true
@@ -48,6 +49,7 @@ let rec is_value (t : pterm) : bool =
   | App(Var _, v) when is_value v -> true
   | _ -> false
 
+(* Effectue une étape de la stratégie LtR CbV *)
 let rec ltr_ctb_step (t : pterm) : pterm option =
   match t with
   | Var _ -> None
@@ -62,6 +64,7 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
                   | Abs(str, t'), valeur when is_value valeur -> Some (substitution str valeur t')
                   | _ -> None
 
+(* Appelle consécutivement ltr_ctb_step, pour normaliser un terme autant que possible *)
 let rec ltr_cbv_norm (t : pterm) : pterm =
   match t with
   | Var x -> Var x
@@ -70,31 +73,73 @@ let rec ltr_cbv_norm (t : pterm) : pterm =
                     | Some t' -> ltr_cbv_norm t'
                     | None -> App(t1, t2)
 
+(* Cette version prend en compte la divergence grâce à l'utilisation de fuel *)
+let rec ltr_cbv_norm' (t : pterm) (n : int) : pterm option =
+  match n with
+  | 0 -> None
+  | _ -> (match t with
+    | Var x -> Some (Var x)
+    | Abs (x, t') -> Some (Abs (x, t'))
+    | App(t1, t2) -> match ltr_ctb_step (App(t1, t2)) with
+                      | Some t' -> (ltr_cbv_norm' t' (n - 1))
+                      | None -> Some (App(t1, t2)))
+
 (* TODO:  Ecrire ensuite une version de cette fonction qui prend en compte la divergence (par exemple avec un timeout ) 
  https://stackoverflow.com/questions/70977947/how-to-efficiently-stop-a-function-after-a-certain-amount-of-time-in-ocaml
  => Fin de la question 6
 *)
 
+
 let () =
-let term1 = App (Abs ("x", Var "x"), Var "y") in
-let term2 = App (App (Abs ("x", Var "x"), Var "y"), Var "z") in
-let term3 = App (App (Abs ("x", Abs ("y", Var "x")), Var "a"), Var "b") in
-let term4 = App (App (App (Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))), Var "a"), Var "b"), Var "c") in
-let omega = App (Abs ("x", App (Var "x", Var "x")), Abs ("x", App (Var "x", Var "x"))) in
+  let fuel = 10000 in
 
-let test term name =
-  Printf.printf "%s - Avant réduction : %s\n" name (print_term term);
-  try
-    let result = ltr_cbv_norm term in
-    Printf.printf "%s - Après réduction : %s\n\n" name (print_term result)
-  with _ ->
-    Printf.printf "%s - Divergence détectée\n\n" name
-in
+  let test term name =
+    Printf.printf "%s - Avant réduction : %s\n" name (print_term term);
+    match ltr_cbv_norm' term fuel with
+    | Some result ->
+        Printf.printf "%s - Après réduction : %s\n\n" name (print_term result)
+    | None ->
+        Printf.printf "%s - Impossible de réduire le terme dans les %d étapes (divergence possible).\n\n" name fuel
+  in
 
-(* Exécuter chaque test *)
-test term1 "Test 1 (Identité simple)";
-test term2 "Test 2 (Double application de l'identité)";
-test term3 "Test 3 (Combinateur K)";
-test term4 "Test 4 (Combinateur S appliqué)";
-test omega "Test 5 (Application infinie Ω)";
-                  
+  (* I : Identité
+    résultat attendu : λx.x 
+    donc : (fun x -> x) *)
+  let i_term = Abs ("x", Var "x") in
+
+  (* δ : auto-application
+    résultat attendu : λx. x x
+    donc : (fun x -> (x x)) *)
+  let delta_term = Abs ("x", App (Var "x", Var "x")) in
+
+  (* Ω : divergence
+    résultat attendu : (λx. x x) (λx. x x)
+    donc : divergence ou on peut aussi donner ((fun x -> (x x)) (fun x -> (x x))) *)
+  let omega_term = App (delta_term, delta_term) in
+
+  (* S
+    résultat attendu : λx. λy. λz. x z (y z)
+    donc : (fun x -> (fun y -> (fun z -> ((x z) (y z))))) *)
+  let s_term = Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))) in
+
+  let k_term = Abs ("x", Abs ("y", Var "x")) in
+
+  (* S K K
+    résultat attendu : λx. λy. x
+    donc : (fun z -> z) *)
+  let skk_term = App (App (s_term, k_term), k_term) in
+
+  (* S I I
+    résultat attendu : λz. z z
+    donc : (fun z -> (z z)) *)
+  let sii_term = App (App (s_term, i_term), i_term) in
+
+  (* Tests *)
+  test i_term "Test I";
+  test delta_term "Test δ (Delta)";
+  test omega_term "Test Ω (Omega)";
+  test k_term "Test K";
+  test s_term "Test S";
+  test skk_term "Test S K K";
+  test sii_term "Test S I I";
+

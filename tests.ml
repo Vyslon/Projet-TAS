@@ -54,3 +54,51 @@ let () =
   (match ltr_ctb_step term4 with
   | Some result -> Printf.printf "Test 4 - Après réduction : %s\n\n" (print_term result)
   | None -> Printf.printf "Test 4 - Aucun pas de réduction possible\n\n");
+
+let () =
+  let term1 = App (Abs ("x", Var "x"), Var "y") in
+  let term2 = App (App (Abs ("x", Var "x"), Var "y"), Var "z") in
+  let term3 = App (App (Abs ("x", Abs ("y", Var "x")), Var "a"), Var "b") in
+  let term4 = App (App (App (Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))), Var "a"), Var "b"), Var "c") in
+  let omega = App (Abs ("x", App (Var "x", Var "x")), Abs ("x", App (Var "x", Var "x"))) in
+  
+  let test term name =
+    Printf.printf "%s - Avant réduction : %s\n" name (print_term term);
+    try
+      let result = ltr_cbv_norm term in
+      Printf.printf "%s - Après réduction : %s\n\n" name (print_term result)
+    with _ ->
+      Printf.printf "%s - Divergence détectée\n\n" name
+  in
+  
+  (* Exécuter chaque test *)
+  test term1 "Test 1 (Identité simple)";
+  test term2 "Test 2 (Double application de l'identité)";
+  test term3 "Test 3 (Combinateur K)";
+  test term4 "Test 4 (Combinateur S appliqué)";
+  test omega "Test 5 (Application infinie Ω)";
+
+  let () =
+  let term1 = App (Abs ("x", Var "x"), Var "y") in
+  let term2 = App (App (Abs ("x", Var "x"), Var "y"), Var "z") in
+  let term3 = App (App (Abs ("x", Abs ("y", Var "x")), Var "a"), Var "b") in
+  let term4 = App (App (App (Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))), Var "a"), Var "b"), Var "c") in
+  let omega = App (Abs ("x", App (Var "x", Var "x")), Abs ("x", App (Var "x", Var "x"))) in
+
+  let fuel = 100000  (* Définir le nombre maximal d'étapes de réduction *) in
+
+  let test term name =
+    Printf.printf "%s - Avant réduction : %s\n" name (print_term term);
+    match ltr_cbv_norm' term fuel with
+    | Some result ->
+        Printf.printf "%s - Après réduction : %s\n\n" name (print_term result)
+    | None ->
+        Printf.printf "%s - Impossible de réduire le terme dans les %d étapes (divergence possible).\n\n" name fuel
+  in
+
+  (* Exécuter chaque test *)
+  test term1 "Test 1 (Identité simple)";
+  test term2 "Test 2 (Double application de l'identité)";
+  test term3 "Test 3 (Combinateur K)";
+  test term4 "Test 4 (Combinateur S appliqué)";
+  test omega "Test 5 (Application infinie Ω)";
