@@ -48,21 +48,27 @@ let rec is_value (t : pterm) : bool =
   | Abs(_, _) -> true
   | App(Var _, v) when is_value v -> true
   | _ -> false
+  
 
 (* Effectue une étape de la stratégie LtR CbV *)
 let rec ltr_ctb_step (t : pterm) : pterm option =
   match t with
   | Var _ -> None
-  | Abs (_, _) -> None
+  | Abs (x, t1) ->
+      begin match ltr_ctb_step t1 with
+      | Some t1' -> Some (Abs (x, t1'))
+      | None -> None
+      end
   | App(t1, t2) -> 
-      match ltr_ctb_step t1 with (* vérifier que t1 n'est pas une value? *)
+      match ltr_ctb_step t1 with
       | Some t1' -> Some (App(t1', t2))
       | None -> match ltr_ctb_step t2 with
                 | Some t2' -> Some (App(t1, t2'))
                 | None ->   
-                  match t1, t2 with
-                  | Abs(str, t'), valeur when is_value valeur -> Some (substitution str valeur t')
-                  | _ -> None
+                    match t1, t2 with
+                    | Abs(str, t'), valeur when is_value valeur -> Some (substitution str valeur t')
+                    | _ -> None
+
 
 (* Appelle consécutivement ltr_ctb_step, pour normaliser un terme autant que possible *)
 let rec ltr_cbv_norm (t : pterm) : pterm =
