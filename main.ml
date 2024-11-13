@@ -95,11 +95,11 @@ type eqTypage = (ptype * ptype) list
 
 type env = (string * ptype) list
 
-let rec getInEnv env x =
-  match env with
+let rec getInEnv (e : env) (x : string) : ptype =
+  match e with
     [] -> failwith "Variable non présente dans l'environnement"
-    |(s,t)::envs when x = s -> t
-    |_::envs -> getInEnv envs x
+    | (s,t)::envs when x = s -> t
+    | _::envs -> getInEnv envs x
 
 let compteur_var_t : int ref = ref 0
 
@@ -110,11 +110,15 @@ let nouvelle_var_t () : string = compteur_var_t := !compteur_var_t + 1;
 let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
   match t with
   | Var x -> let typeV = getInEnv e x in [(typeV, cible)]
-  | Abs(x, t') -> let nomta = nouvelle_var_t () in
-    let ta = TypeVar nomta in
-    let nomtr = nouvelle_var_t () in 
-    let tr = TypeVar nomtr in
-    (genereTypage t' ((x, ta)::e) tr)
-  | _ -> failwith "Work In Progress"
+  | Abs(x, t') -> let nomTa = nouvelle_var_t () in
+    let ta = TypeVar nomTa in
+    let nomTr = nouvelle_var_t () in 
+    let tr = TypeVar nomTr in
+    (cible, Arr(ta, tr))::(genereTypage t' ((x, ta)::e) tr)
+  | App(t1, t2) -> let nomTa = nouvelle_var () in
+    let ta = TypeVar nomTa in 
+    let t1' = (genereTypage t1 e (Arr(ta, cible))) in
+    let t2' = (genereTypage t2 e ta) in
+    t1'@t2'
 
-  (* J'en suis à "Si le terme est une application, elle prend une variable de type fraˆıche Ta, puis g ́en`ere r ́ecursivement les  ́equations du terme en position de fonction, avec le type cible Ta → T, et les  ́equations du terme en position d’argument avec le type cible Ta, en gardant le mˆeme environnement dans les deux cas."*)
+  
