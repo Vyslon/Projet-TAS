@@ -112,24 +112,26 @@ let nouvelle_var_t () : string =
   compteur_var_t := !compteur_var_t + 1;
   "T" ^ string_of_int !compteur_var_t
 
-(* génère des équations de typage à partir d’un terme *)
+(* Generate typing equations from a term *)
 let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
   match t with
-  | Var x -> let typeV = getInEnv e x in [(typeV, cible)]
+  | Var x ->
+      let typeV = getInEnv e x in
+      [(typeV, cible)]
   | Abs(x, t') ->
-      let nomTa = nouvelle_var_t () in
-      let ta = TypeVar nomTa in
-      let nomTr = nouvelle_var_t () in
-      let tr = TypeVar nomTr in
-      (cible, Arr(ta, tr))::(genereTypage t' ((x, ta)::e) tr)
+      let ta =
+        try getInEnv e x
+        with _ -> TypeVar (nouvelle_var_t ())
+      in
+      let tr = TypeVar (nouvelle_var_t ()) in
+      (cible, Arr(ta, tr)) :: (genereTypage t' ((x, ta) :: e) tr)
   | App(t1, t2) ->
-      let nomTa = nouvelle_var_t () in
-      let ta = TypeVar nomTa in
-      let t1' = genereTypage t1 e (Arr(ta, cible)) in
-      let t2' = genereTypage t2 e ta in
-      t1'@t2'
+      let ta = TypeVar (nouvelle_var_t ()) in
+      let t1_eqs = genereTypage t1 e (Arr(ta, cible)) in
+      let t2_eqs = genereTypage t2 e ta in
+      t1_eqs @ t2_eqs
 
-(* vérifie si une variable appartient à un type *)
+(* Vérifie si une variable de type apparaît dans un type (pour l'occur check) *)
 let rec occurCheck (var : ptype) (unType : ptype) : bool =
   match var with
   | TypeVar x ->
@@ -139,24 +141,6 @@ let rec occurCheck (var : ptype) (unType : ptype) : bool =
       | Nat -> false
       )
   | _ -> failwith "L'occurCheck ne peut être appelé que sur une variable de type"
-
-(* substitue une variable de type par un type à l’intérieur d’un autre type *)
-let rec subTypeVarType (var : ptype) (unType : ptype) (unAutreType : ptype) : ptype =
-  match var with
-  | TypeVar x ->
-      (match unAutreType with
-      | TypeVar t -> if (x = t) then unType else TypeVar t
-      | Arr(t1, t2) -> Arr((subTypeVarType var unType t1), (subTypeVarType var unType t2))
-      | Nat -> Nat
-      )
-  | _ -> failwith "La substitution de type ne peut être appelée que sur une variable de type"
-
-(* substitue une variable de type par un type partout dans un système d’équation *)
-let rec subTypeVarEquation (var : ptype) (unType : ptype) (systeme : eqTypage) : eqTypage =
-  match systeme with
-  | [] -> []
-  | (t1, t2)::ts ->
-      ((subTypeVarType var unType t1), (subTypeVarType var unType t2))::(subTypeVarEquation var unType ts)
 
 let rec egalite_type (t1 : ptype) ( t2 :ptype) : bool =
   match t1,t2 with
@@ -183,27 +167,37 @@ let rec apply_subst_to_type (subst : substitution) (t : ptype) : ptype =
 let apply_subst_to_equations (subst : substitution) (eqs : eqTypage) : eqTypage =
   List.map (fun (t1, t2) -> (apply_subst_to_type subst t1, apply_subst_to_type subst t2)) eqs
 
-(* Unification function *)
-let rec unify (equations : eqTypage) (subst : substitution) : substitution option =
+(* Unification step function *)
+let unify_step (equations : eqTypage) (subst : substitution) : (eqTypage * substitution) option =
   match equations with
-  | [] -> Some subst
+  | [] -> None  (* No equations left to process *)
   | (t1, t2)::rest ->
-      let t1 = apply_subst_to_type subst t1 in
-      let t2 = apply_subst_to_type subst t2 in
-      if egalite_type t1 t2 then
-        unify rest subst
+      let t1' = apply_subst_to_type subst t1 in
+      let t2' = apply_subst_to_type subst t2 in
+      if egalite_type t1' t2' then
+        Some (rest, subst)
       else
-        match (t1, t2) with
+        match (t1', t2') with
         | (TypeVar x, t) | (t, TypeVar x) ->
             if occurCheck (TypeVar x) t then
               None  (* Occurs check failed *)
             else
               let subst' = (x, t)::subst in
               let rest' = apply_subst_to_equations [(x, t)] rest in
-              unify rest' subst'
+              Some (rest', subst')
         | (Arr (l1, r1), Arr (l2, r2)) ->
-            unify ((l1, l2)::(r1, r2)::rest) subst
+            Some ((l1, l2)::(r1, r2)::rest, subst)
         | _ -> None  (* Unification failed *)
+
+(* Unification function with fuel *)
+let rec unify (equations : eqTypage) (subst : substitution) (fuel : int) : substitution option =
+  if fuel <= 0 then None
+  else
+    match unify_step equations subst with
+    | None -> 
+        if equations = [] then Some subst else None
+    | Some (new_eqs, new_subst) ->
+        unify new_eqs new_subst (fuel - 1)
 
 let rec print_substitution (subst : substitution) : string =
   match subst with
@@ -214,7 +208,7 @@ let rec print_substitution (subst : substitution) : string =
 let inference (t : pterm) (e : env) : ptype option =
   let ta = TypeVar (nouvelle_var_t ()) in
   let systeme = genereTypage t e ta in
-  match unify systeme [] with
+  match unify systeme [] 1000 with
   | Some subst ->
       let inferred_type = apply_subst_to_type subst ta in
       (* For debugging: print the final substitutions *)
