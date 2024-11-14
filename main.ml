@@ -4,7 +4,27 @@ type pterm =
   | Abs of string * pterm
   | Entier of int
   | Addition of pterm * pterm
-  | Soustraction of pterm * pterm 
+  | Soustraction of pterm * pterm
+  | Nil (* Liste vide *)
+  | Cons of pterm * pterm
+
+let is_empty liste = (liste = Nil)
+
+let is_liste (t : pterm) : bool =
+  match t with
+  | _ -> failwith "TODO"
+
+let head (liste : pterm) : pterm =
+  match liste with
+  | Nil -> failwith "Liste vide"
+  | Cons (x, _) -> x
+  | _ -> failwith "Appel de la fonction head sur un terme qui n'est pas une liste"
+
+let queue (liste : pterm) : pterm =
+  match liste with
+  | Nil -> failwith "Liste vide"
+  | Cons (_, xs) -> xs
+  | _ -> failwith "Appel de la fonction tail sur un terme qui n'est pas une liste"
 
 let rec print_term (t : pterm) : string =
   match t with
@@ -24,6 +44,8 @@ let rec print_term (t : pterm) : string =
       | (Entier i, k) ->  string_of_int i ^ " - " ^ (print_term k)
       | (i, Entier k) -> (print_term i) ^ " - " ^ string_of_int k
       | (i, k) -> (print_term i) ^ " - " ^ (print_term k))
+  | Nil -> "[]"
+  | Cons (x, xs) -> print_term x ^ "::" ^ print_term xs
 
 let compteur_var : int ref = ref 0
 
@@ -124,6 +146,15 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
           | Some i', None -> Some (Soustraction (i', k))
           | None, Some k' -> Some (Soustraction (i, k'))
           | None, None -> None))
+  | Nil -> None
+  | Cons(x, xs) ->
+    let next = (ltr_ctb_step x) in
+    match next with
+    | Some reduction -> Some (Cons (reduction, xs)) (* TODO : lancer le step sur xs ? *)
+    | None -> let nextXS = (ltr_ctb_step xs) in
+        match nextXS with
+        | Some reductionXS -> Some (Cons(x, reductionXS))
+        | None -> Some (Cons(x, xs))
 
 
 (* Appelle consécutivement ltr_ctb_step, pour normaliser un terme autant que possible *)
@@ -274,36 +305,43 @@ let print_inference_result term env typeAttendu =
       Printf.printf "Type attendu : %s\n\n" typeAttendu
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
-let () =
-  (* Define some sample terms *)
-  let term1 = Addition (Entier 3, Entier 5) in
-  let term2 = Soustraction (Entier 10, Entier 7) in
-  let term3 = Addition (Entier 4, Soustraction (Entier 9, Entier 3)) in
-  let term4 = Addition (term1, term2) in  (* Nested operations *)
+  let () =
+  (* Création de listes pour les tests *)
+  let liste1 = Cons (Entier 1, Cons (Entier 2, Cons (Entier 3, Nil))) in
+  let liste2 = Cons (Entier 4, liste1) in  (* [4, 1, 2, 3] *)
+  let liste_vide = Nil in
 
-  (* Define a fuel limit for the normalization function *)
-  let fuel = 10 in
+  (* Définition de la limite de carburant pour éviter les boucles infinies *)
+  let fuel = 1000 in
 
-  (* Print and evaluate term1 *)
-  Printf.printf "Evaluating term1: %s\n" (print_term term1);
-  (match ltr_cbv_norm' term1 fuel with
-   | Some result -> Printf.printf "Result: %s\n\n" (print_term result)
-   | None -> Printf.printf "Divergence detected in term1\n\n");
+  (* Test de l'évaluation de liste1 *)
+  Printf.printf "Évaluation de liste1: %s\n" (print_term liste1);
+  (match ltr_cbv_norm' liste1 fuel with
+   | Some result -> Printf.printf "Résultat: %s\n\n" (print_term result)
+   | None -> Printf.printf "Échec de l'évaluation ou divergence pour liste1\n\n");
 
-  (* Print and evaluate term2 *)
-  Printf.printf "Evaluating term2: %s\n" (print_term term2);
-  (match ltr_cbv_norm' term2 fuel with
-   | Some result -> Printf.printf "Result: %s\n\n" (print_term result)
-   | None -> Printf.printf "Divergence detected in term2\n\n");
+  (* Test de l'évaluation de liste2 *)
+  Printf.printf "Évaluation de liste2: %s\n" (print_term liste2);
+  (match ltr_cbv_norm' liste2 fuel with
+   | Some result -> Printf.printf "Résultat: %s\n\n" (print_term result)
+   | None -> Printf.printf "Échec de l'évaluation ou divergence pour liste2\n\n");
 
-  (* Print and evaluate term3 *)
-  Printf.printf "Evaluating term3: %s\n" (print_term term3);
-  (match ltr_cbv_norm' term3 fuel with
-   | Some result -> Printf.printf "Result: %s\n\n" (print_term result)
-   | None -> Printf.printf "Divergence detected in term3\n\n");
+  (* Test de l'évaluation d'une liste vide *)
+  Printf.printf "Évaluation de liste_vide: %s\n" (print_term liste_vide);
+  (match ltr_cbv_norm' liste_vide fuel with
+   | Some result -> Printf.printf "Résultat: %s\n\n" (print_term result)
+   | None -> Printf.printf "Échec de l'évaluation ou divergence pour liste_vide\n\n");
 
-  (* Print and evaluate term4 *)
-  Printf.printf "Evaluating term4: %s\n" (print_term term4);
-  (match ltr_cbv_norm' term4 fuel with
-   | Some result -> Printf.printf "Result: %s\n\n" (print_term result)
-   | None -> Printf.printf "Divergence detected in term4\n\n")
+  (* Test de l'opération head sur liste1 *)
+  Printf.printf "Head de liste1: ";
+  (try Printf.printf "%s\n\n" (print_term (head liste1))
+   with Failure msg -> Printf.printf "Erreur: %s\n\n" msg);
+
+  (* Test de l'opération queue sur liste1 *)
+  Printf.printf "Queue de liste1: ";
+  (try Printf.printf "%s\n\n" (print_term (queue liste1))
+   with Failure msg -> Printf.printf "Erreur: %s\n\n" msg);
+
+  (* Test de is_empty sur liste_vide et liste1 *)
+  Printf.printf "Liste_vide est vide? %b\n" (is_empty liste_vide);
+  Printf.printf "Liste1 est vide? %b\n\n" (is_empty liste1);
