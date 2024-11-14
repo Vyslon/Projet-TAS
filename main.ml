@@ -116,9 +116,11 @@ let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
     let nomTr = nouvelle_var_t () in 
     let tr = TypeVar nomTr in
     (cible, Arr(ta, tr))::(genereTypage t' ((x, ta)::e) tr)
-  | App(t1, t2) -> let nomTa = nouvelle_var () in
+  | App(t1, t2) -> let nomTa = nouvelle_var_t () in
     let ta = TypeVar nomTa in 
-    let t1' = (genereTypage t1 e (Arr(ta, cible))) in
+    let nomTr = nouvelle_var_t () in 
+    let tr = TypeVar nomTr in
+    let t1' = (genereTypage t1 e (Arr(ta, tr))) in
     let t2' = (genereTypage t2 e ta) in
     t1'@t2'
 
@@ -151,107 +153,83 @@ let rec subTypeVarEquation (var : ptype) (unType : ptype) (systeme : eqTypage) :
   )
   | _ -> failwith "La substitution de type ne peut être appelé que sur une variable de type"
 
+(* TODO:  vraiment nécessaire ? modifier si je le garde *)
+let rec egalite_type (t1 : ptype) ( t2 :ptype) : bool = 
+  match t1,t2 with
+  | TypeVar s1, TypeVar s2 -> s1 = s2
+  |(Arr (t11,t12)),(Arr(t21,t22)) -> (egalite_type t11 t21) && (egalite_type t12  t22)
+  | Nat,Nat -> true 
+  | _,_ -> false
+
+(* TODO : modifier *)
 (* Réalise une étape d'unification *)
 let rec unification_step (systeme : eqTypage) : eqTypage =
   match systeme with
   | [] -> []
-  | (t1, t2)::ts when t1 = t2 -> ts
-  | (TypeVar x, t2)::ts when not (occurCheck (TypeVar x) t2) -> (subTypeVarEquation (TypeVar x) t2 ts)
-  | (t1, TypeVar x)::ts when not (occurCheck (TypeVar x) t1) -> (subTypeVarEquation (TypeVar x) t1 ts)
-  | (Arr(t1, t2), Arr(t3, t4))::ts -> (t1, t3)::(t2, t4)::ts
-  | _ -> failwith "Erreur d'unification"
+  | (t1, t2)::ts when egalite_type t1 t2 -> (unification_step ts)
+  (* | (TypeVar x, t2)::ts when (not (occurCheck (TypeVar x) t2)) -> (subTypeVarEquation (TypeVar x) t2 ts)
+  | (t1, TypeVar x)::ts when (not (occurCheck (TypeVar x) t1)) -> (subTypeVarEquation (TypeVar x) t1 ts) *)
+  | (TypeVar x, t2)::ts when (not (occurCheck (TypeVar x) t2)) ->
+    let queue_substituee = List.map (fun (a, b) -> (subTypeVarType (TypeVar x) t2 a, subTypeVarType (TypeVar x) t2 b)) ts in
+              (TypeVar x, t2) :: unification_step queue_substituee
+  | (t1, TypeVar x)::ts when (not (occurCheck (TypeVar x) t1)) ->
+    let queue_substituee = List.map (fun (a, b) -> (subTypeVarType (TypeVar x) t1 a, subTypeVarType (TypeVar x) t1 b)) ts in
+              (t1, TypeVar x) :: unification_step queue_substituee
+  | (Arr(t1, t2), Arr(t3, t4))::ts -> unification_step ((t1, t3)::(t2, t4)::ts)
+  | _ -> failwith "erreur d'unification"
 
 (* Résout un système d’équation (avec du fuel à la place du timeout) *)
 let rec unification (systeme : eqTypage) (n : int) : eqTypage option =
   if (n = 0) then None else
     let next_step = (unification_step systeme) in
-    if next_step = systeme then
-      Some systeme  (* Le système n'a pas changé, donc on arrête *)
-    else
-      unification next_step (n - 1)
+    if (next_step = systeme) then Some systeme else unification next_step (n - 1)
 
-(* générer l'équation de typage > résoudre le système d'équation > conclure *)
-let infereType (t : pterm) (e : env) : ptype option =
-  let nomCible = nouvelle_var_t () in
-  let cible = TypeVar nomCible in
-  let systeme = (genereTypage t e cible) in (* On génère l'équation de typage à partir d'un environnement nul et d'une variable de type *)
-  let systemeUnifie = (unification systeme 1000) in
-  match systemeUnifie with
-  | Some [(t1, t2)] -> Some t2
-  | _  -> None
+(* Define the types and functions as before *)
 
-let print_systeme (systeme : eqTypage) : string =
-  match systeme with
-  | [] -> ""
-  | (t1, t2)::xs -> "(" ^ (print_type t1) ^ " = " ^ (print_type t2) ^ "\n"
 
-  let () =
+
+
+(* Applique récursivement et complètement les substitutions finales à un type *)
+let rec apply_substitutions (subst : eqTypage) (t : ptype) : ptype =
+  match t with
+  | TypeVar x ->
+      (try 
+        let replacement = List.assoc (TypeVar x) subst in
+        apply_substitutions subst replacement  (* Résoudre récursivement *)
+       with Not_found -> t)
+  | Arr (t1, t2) -> Arr (apply_substitutions subst t1, apply_substitutions subst t2)
+  | Nat -> Nat
+
+let () =
   (* Fonction pour afficher un système d'équations de typage *)
   let print_systeme systeme =
-    List.iter (fun (t1, t2) -> Printf.printf "%s = %s\n" (print_type t1) (print_type t2)) systeme
+    List.iter (fun (t1, t2) -> Printf.printf "%s = %s\n" (print_type t1) (print_type t2)) systeme;
+    Printf.printf "\n"
   in
 
-  (* Fonction de test pour afficher le système d'équations avant et après unification *)
-  let test_typing term env name =
-    Printf.printf "Nom du test : %s\nTerme : %s\n" name (print_term term);
-    
-    let cible = TypeVar (nouvelle_var_t ()) in
-    let systeme = genereTypage term env cible in
-    
-    Printf.printf "\nSystème d'équations initial:\n";
+  (* Fonction pour afficher le type inféré après résolution *)
+  let print_inference_result term env expected_type =
+    Printf.printf "Terme : %s\n" (print_term term);
+    let cible = TypeVar (nouvelle_var_t ()) in  (* Type cible initial *)
+    let systeme = genereTypage term env cible in  (* Génération du système d'équations *)
+    Printf.printf "Système d'équations généré :\n";
     print_systeme systeme;
 
-    (* Tentative d'unification *)
-    let systemeUnifie = unification systeme 1000 in
-
-    (* Affichage du système après unification *)
-    match systemeUnifie with
-    | Some liste -> 
-        Printf.printf "\nSystème d'équations après unification:\n";
-        print_systeme liste;
-        Printf.printf "\n"
+    match unification systeme 1000 with
+    | Some res -> 
+        Printf.printf "Système d'équations après unification :\n";
+        print_systeme res;
+        
+        (* Applique les substitutions pour obtenir le type final résolu *)
+        let final_type = apply_substitutions res cible in
+        Printf.printf "Type inféré : %s (attendu : %s)\n\n" (print_type final_type) expected_type
     | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
   in
 
-  (* Lancer des tests pour différents termes *)
+  (* Cas de test pour l'inférence de type *)
 
-  (* 1. Variable simple *)
-  let var_x = Var "x" in
-  test_typing var_x [("x", TypeVar "T1")] "Variable x";
-
-  (* 2. Identité *)
+  (* 1. Identité *)
   let id_term = Abs ("x", Var "x") in
-  test_typing id_term [] "Identité (λx. x)";
-
-  (* 3. Application de l'identité à y *)
-  let app_term = App (id_term, Var "y") in
-  test_typing app_term [("y", TypeVar "T2")] "Application de l'identité à y";
-
-  (* 4. Fonction constante *)
-  let const_term = Abs ("x", Abs ("y", Var "x")) in
-  test_typing const_term [] "Fonction constante (λx. λy. x)";
-
-  (* 5. Application de la fonction constante à z et w *)
-  let const_app = App (App (const_term, Var "z"), Var "w") in
-  test_typing const_app [("z", TypeVar "T3"); ("w", TypeVar "T4")] "Application de la fonction constante à z et w";
-
-  (* 6. Application incorrecte *)
-  let invalid_app = App (Var "x", Abs ("y", Var "y")) in
-  test_typing invalid_app [("x", TypeVar "T5")] "Application incorrecte (x (λy. y))";
-
-  (* 7. Combinator Ω *)
-  let omega_term = App (Abs ("x", App (Var "x", Var "x")), Abs ("x", App (Var "x", Var "x"))) in
-  test_typing omega_term [] "Combinator Ω (divergence)";
-
-  (* 8. Combinator S *)
-  let s_term = Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))) in
-  test_typing s_term [] "Combinator S (λx. λy. λz. x z (y z))";
-
-  (* 9. S K K combinator (identité) *)
-  let k_term = Abs ("x", Abs ("y", Var "x")) in
-  let skk_term = App (App (s_term, k_term), k_term) in
-  test_typing skk_term [] "S K K combinator (identité)";
-
-  (* 10. Application de Nat *)
-  let nat_term = Abs ("f", Abs ("x", App (Var "f", Var "x"))) in
-  test_typing nat_term [("f", Arr (Nat, Nat))] "Application de Nat (λf. λx. f x)";
+  (* Résultat attendu : T -> T *)
+  print_inference_result id_term [] "(T -> T)";
+  
