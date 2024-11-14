@@ -161,20 +161,13 @@ let rec egalite_type (t1 : ptype) ( t2 :ptype) : bool =
   | Nat,Nat -> true 
   | _,_ -> false
 
-(* TODO : modifier *)
 (* Réalise une étape d'unification *)
 let rec unification_step (systeme : eqTypage) : eqTypage =
   match systeme with
   | [] -> []
   | (t1, t2)::ts when egalite_type t1 t2 -> (unification_step ts)
-  (* | (TypeVar x, t2)::ts when (not (occurCheck (TypeVar x) t2)) -> (subTypeVarEquation (TypeVar x) t2 ts)
-  | (t1, TypeVar x)::ts when (not (occurCheck (TypeVar x) t1)) -> (subTypeVarEquation (TypeVar x) t1 ts) *)
-  | (TypeVar x, t2)::ts when (not (occurCheck (TypeVar x) t2)) ->
-    let queue_substituee = List.map (fun (a, b) -> (subTypeVarType (TypeVar x) t2 a, subTypeVarType (TypeVar x) t2 b)) ts in
-              (TypeVar x, t2) :: unification_step queue_substituee
-  | (t1, TypeVar x)::ts when (not (occurCheck (TypeVar x) t1)) ->
-    let queue_substituee = List.map (fun (a, b) -> (subTypeVarType (TypeVar x) t1 a, subTypeVarType (TypeVar x) t1 b)) ts in
-              (t1, TypeVar x) :: unification_step queue_substituee
+  | (TypeVar x, t2)::ts when (not (occurCheck (TypeVar x) t2)) -> (TypeVar x, t2)::(unification_step (subTypeVarEquation (TypeVar x) t2 ts))
+  | (t1, TypeVar x)::ts when (not (occurCheck (TypeVar x) t1)) -> (t1, TypeVar x)::(unification_step (subTypeVarEquation (TypeVar x) t1 ts))
   | (Arr(t1, t2), Arr(t3, t4))::ts -> unification_step ((t1, t3)::(t2, t4)::ts)
   | _ -> failwith "erreur d'unification"
 
@@ -184,52 +177,102 @@ let rec unification (systeme : eqTypage) (n : int) : eqTypage option =
     let next_step = (unification_step systeme) in
     if (next_step = systeme) then Some systeme else unification next_step (n - 1)
 
-(* Define the types and functions as before *)
+(* let inference (t : pterm) (e : env) : ptype option =
+  let ta = TypeVar "T" in
+  let systeme = genereTypage t e ta in
+  match unification systeme 1000 with
+  | Some eq -> Some (findRes ta eq )
+  | None -> None *)
 
+(* Build a substitution mapping from unified equations *)
+let build_substitution (equations : eqTypage) : eqTypage =
+  List.fold_left (fun acc (t1, t2) ->
+    match t1, t2 with
+    | TypeVar x, ty when not (t1 = ty) -> (TypeVar x, ty) :: acc
+    | ty, TypeVar x when not (t1 = ty) -> (TypeVar x, ty) :: acc
+    | _ -> acc
+  ) [] equations
 
-
-
-(* Applique récursivement et complètement les substitutions finales à un type *)
+(* Apply substitutions to a type *)
 let rec apply_substitutions (subst : eqTypage) (t : ptype) : ptype =
   match t with
   | TypeVar x ->
-      (try 
-        let replacement = List.assoc (TypeVar x) subst in
-        apply_substitutions subst replacement  (* Résoudre récursivement *)
-       with Not_found -> t)
-  | Arr (t1, t2) -> Arr (apply_substitutions subst t1, apply_substitutions subst t2)
+      (match List.find_opt (fun (TypeVar y, _) -> x = y) subst with
+       | Some (_, ty) -> apply_substitutions subst ty
+       | None -> t)
+  | Arr (t1, t2) ->
+      Arr (apply_substitutions subst t1, apply_substitutions subst t2)
   | Nat -> Nat
 
-let () =
-  (* Fonction pour afficher un système d'équations de typage *)
-  let print_systeme systeme =
-    List.iter (fun (t1, t2) -> Printf.printf "%s = %s\n" (print_type t1) (print_type t2)) systeme;
-    Printf.printf "\n"
-  in
+(* Inference function *)
+let inference (t : pterm) (e : env) : ptype option =
+  let ta = TypeVar (nouvelle_var_t ()) in
+  let systeme = genereTypage t e ta in
+  match unification systeme 1000 with
+  | Some unified_system ->
+      let substitutions = build_substitution unified_system in
+      let inferred_type = apply_substitutions substitutions ta in
+      Some inferred_type
+  | None -> None
 
-  (* Fonction pour afficher le type inféré après résolution *)
-  let print_inference_result term env expected_type =
-    Printf.printf "Terme : %s\n" (print_term term);
-    let cible = TypeVar (nouvelle_var_t ()) in  (* Type cible initial *)
-    let systeme = genereTypage term env cible in  (* Génération du système d'équations *)
-    Printf.printf "Système d'équations généré :\n";
-    print_systeme systeme;
+(* Function to compare types structurally, considering all type variables equal *)
+let rec types_equal t1 t2 =
+  match t1, t2 with
+  | TypeVar _, TypeVar _ -> true  (* Consider all type variables as equal *)
+  | Arr (a1, b1), Arr (a2, b2) -> types_equal a1 a2 && types_equal b1 b2
+  | Nat, Nat -> true
+  | _, _ -> false
 
-    match unification systeme 1000 with
-    | Some res -> 
-        Printf.printf "Système d'équations après unification :\n";
-        print_systeme res;
-        
-        (* Applique les substitutions pour obtenir le type final résolu *)
-        let final_type = apply_substitutions res cible in
-        Printf.printf "Type inféré : %s (attendu : %s)\n\n" (print_type final_type) expected_type
-    | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
-  in
+(* Main function to test the inference function *)
+let test_inference () =
+  Printf.printf "Testing type inference:\n\n";
 
-  (* Cas de test pour l'inférence de type *)
+  (* Define test cases: (description, term, environment, expected type option) *)
+  let test_cases = [
+    ("Identity function",
+     Abs ("x", Var "x"),
+     [],
+     Some (Arr (TypeVar "_", TypeVar "_")));  (* Expected type *)
 
-  (* 1. Identité *)
-  let id_term = Abs ("x", Var "x") in
-  (* Résultat attendu : T -> T *)
-  print_inference_result id_term [] "(T -> T)";
-  
+    ("Constant function",
+     Abs ("x", Abs ("y", Var "x")),
+     [],
+     Some (Arr (TypeVar "_", Arr (TypeVar "_", TypeVar "_"))));  (* T1 -> (T2 -> T1) *)
+
+    ("Application of identity function",
+     App (Abs ("x", Var "x"), Var "y"),
+     [("y", TypeVar "T0")],  (* y : T0 *)
+     Some (TypeVar "T0"));  (* Expected type is T0 *)
+
+    ("Omega function (divergence)",
+     App (Abs ("x", App (Var "x", Var "x")), Abs ("x", App (Var "x", Var "x"))),
+     [],
+     None);  (* Not typable *)
+  ] in
+
+  (* Run each test case *)
+  List.iter (fun (desc, term, env, expected_type) ->
+    Printf.printf "Test: %s\n" desc;
+    Printf.printf "Term: %s\n" (print_term term);
+    (match expected_type with
+     | Some ty -> Printf.printf "Expected type: %s\n" (print_type ty)
+     | None -> Printf.printf "Expected type: Not typable\n");
+    match inference term env with
+    | Some inferred_type ->
+        Printf.printf "Inferred type: %s\n" (print_type inferred_type);
+        (match expected_type with
+         | Some expected_type_value ->
+             let result = if types_equal inferred_type expected_type_value then "Success" else "Mismatch" in
+             Printf.printf "Result: %s\n\n" result
+         | None ->
+             Printf.printf "Type inference succeeded, but expected failure.\nResult: Failure\n\n")
+    | None ->
+        (match expected_type with
+         | None ->
+             Printf.printf "Type inference failed as expected.\nResult: Success\n\n"
+         | Some _ ->
+             Printf.printf "Type inference failed unexpectedly.\nResult: Failure\n\n")
+  ) test_cases
+
+(* Entry point *)
+let () = test_inference ()
