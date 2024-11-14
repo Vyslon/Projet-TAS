@@ -2,12 +2,28 @@ type pterm =
     Var of string
   | App of pterm * pterm
   | Abs of string * pterm
+  | Entier of int
+  | Addition of pterm * pterm
+  | Soustraction of pterm * pterm 
 
 let rec print_term (t : pterm) : string =
   match t with
     Var x -> x
     | App (t1, t2) -> "(" ^ (print_term t1) ^" "^ (print_term t2) ^ ")"
     | Abs (x, t) -> "(fun "^ x ^" -> " ^ (print_term t) ^ ")"
+    | Entier n -> string_of_int n
+    | Addition (x, y) -> (
+      match (x, y) with 
+      | (Entier i, Entier k) -> string_of_int i ^ " + " ^ string_of_int k
+      | (Entier i, k) ->  string_of_int i ^ " + " ^ (print_term k)
+      | (i, Entier k) -> (print_term i) ^ " + " ^ string_of_int k
+      | (i, k) -> (print_term i) ^ " + " ^ (print_term k))
+  | Soustraction (x, y) -> (
+      match (x, y) with 
+      | (Entier i, Entier k) -> string_of_int i ^ " - " ^ string_of_int k
+      | (Entier i, k) ->  string_of_int i ^ " - " ^ (print_term k)
+      | (i, Entier k) -> (print_term i) ^ " - " ^ string_of_int k
+      | (i, k) -> (print_term i) ^ " - " ^ (print_term k))
 
 let compteur_var : int ref = ref 0
 
@@ -21,6 +37,7 @@ let rec variablesLibres (t : pterm) : string list =
   | Var x -> [x]
   | App (t1, t2) -> (variablesLibres t1) @ (variablesLibres t2)
   | Abs (x, t1) -> List.filter (fun y -> y <> x) (variablesLibres t1)
+  | _ -> []
 
 (* On remplace dans t chaque occurence de x par n *)
 let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
@@ -34,6 +51,7 @@ let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
           Abs(y', substitutions x n tt')
         else
           Abs (k, substitutions x n tt)
+  | _ -> t
 
 (* alpha-conversion *)
 let rec alphaconv (t : pterm) : pterm =
@@ -42,6 +60,7 @@ let rec alphaconv (t : pterm) : pterm =
   | App (t1, t2) -> App(alphaconv t1, alphaconv t2)
   | Abs (x, tt) -> let x' = (nouvelle_var ()) in
       Abs (x', alphaconv (substitutions x (Var x') tt))
+  | _ -> t
 
 (* Cette fonction détermine si le terme est une valeur ("V" dans le CM 2 p.21) *)
 let rec is_value (t : pterm) : bool =
@@ -61,7 +80,7 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
       | Some t1' -> Some (Abs (x, t1'))
       | None -> None
       end
-  | App(t1, t2) ->
+  | App(t1, t2) -> (
       match ltr_ctb_step t1 with
       | Some t1' -> Some (App(t1', t2))
       | None -> match ltr_ctb_step t2 with
@@ -69,7 +88,43 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
                 | None ->
                     match t1, t2 with
                     | Abs(str, t'), valeur when is_value valeur -> Some (substitutions str valeur t')
-                    | _ -> None
+                    | _ -> None)
+  | Entier x -> None (* Déjà une valeur, donc rien à réduire *)
+  | Addition (x, y) -> (
+      match (x, y) with 
+      | (Entier i, Entier k) -> Some (Entier (i + k))
+      | (Entier i, k) -> (
+          match ltr_ctb_step k with
+          | Some k' -> Some (Addition (Entier i, k'))
+          | None -> None)
+      | (i, Entier k) -> (
+          match ltr_ctb_step i with
+          | Some i' -> Some (Addition (i', Entier k))
+          | None -> None)
+      | (i, k) -> (
+          match ltr_ctb_step i, ltr_ctb_step k with
+          | Some i', Some k' -> Some (Addition (i', k'))
+          | Some i', None -> Some (Addition (i', k))
+          | None, Some k' -> Some (Addition (i, k'))
+          | None, None -> None))
+  | Soustraction (x, y) -> (
+      match (x, y) with 
+      | (Entier i, Entier k) -> Some (Entier (i - k))
+      | (Entier i, k) -> (
+          match ltr_ctb_step k with
+          | Some k' -> Some (Soustraction (Entier i, k'))
+          | None -> None)
+      | (i, Entier k) -> (
+          match ltr_ctb_step i with
+          | Some i' -> Some (Soustraction (i', Entier k))
+          | None -> None)
+      | (i, k) -> (
+          match ltr_ctb_step i, ltr_ctb_step k with
+          | Some i', Some k' -> Some (Soustraction (i', k'))
+          | Some i', None -> Some (Soustraction (i', k))
+          | None, Some k' -> Some (Soustraction (i, k'))
+          | None, None -> None))
+
 
 (* Appelle consécutivement ltr_ctb_step, pour normaliser un terme autant que possible *)
 let rec ltr_cbv_norm (t : pterm) : pterm =
@@ -169,7 +224,7 @@ let substitutDansEquation (subst : substitutions) (eqs : eqTypage) : eqTypage =
   List.map (fun (t1, t2) -> (substitutDansType subst t1, substitutDansType subst t2)) eqs
 
 (* Applique une étape d'unification *)
-let unificationStep (equations : eqTypage) (subst : substitutions) : (eqTypage * substitutions) option =
+let unification_step (equations : eqTypage) (subst : substitutions) : (eqTypage * substitutions) option =
   match equations with
   | [] -> None
   | (t1, t2)::ts ->
@@ -191,20 +246,20 @@ let unificationStep (equations : eqTypage) (subst : substitutions) : (eqTypage *
         | _ -> None
 
 (* Réalise l'unification jusqu'à ce qu'on ait épuisé notre fuel ou notre système d'équations *)
-let rec unify (equations : eqTypage) (subst : substitutions) (fuel : int) : substitutions option =
+let rec unifie (equations : eqTypage) (subst : substitutions) (fuel : int) : substitutions option =
   if fuel <= 0 then None
   else
-    match unificationStep equations subst with
+    match unification_step equations subst with
     | None -> 
         if equations = [] then Some subst else None
     | Some (nouvEquations, nouvSubstitutions) ->
-        unify nouvEquations nouvSubstitutions (fuel - 1)
+        unifie nouvEquations nouvSubstitutions (fuel - 1)
 
 (* Infère le type de t si possible *)
 let inference (t : pterm) (e : env) : ptype option =
   let ta = TypeVar (nouvelle_var_t ()) in
   let systeme = genereTypage t e ta in
-  match unify systeme [] 1000 with
+  match unifie systeme [] 1000 with
   | Some subst ->
       let typeInfere = substitutDansType subst ta in
       Some typeInfere
@@ -220,43 +275,35 @@ let print_inference_result term env typeAttendu =
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
 let () =
-  (* 1. Identité *)
-  let id_term = Abs ("x", Var "x") in
-  (* Résultat attendu : T -> T *)
-  print_inference_result id_term [] "(T -> T)";
+  (* Define some sample terms *)
+  let term1 = Addition (Entier 3, Entier 5) in
+  let term2 = Soustraction (Entier 10, Entier 7) in
+  let term3 = Addition (Entier 4, Soustraction (Entier 9, Entier 3)) in
+  let term4 = Addition (term1, term2) in  (* Nested operations *)
 
-  (* 2. Application de l'identité à y de type T *)
-  let app_id_y = App (id_term, Var "y") in
-  (* Résultat attendu : même type que "y" (par exemple T) *)
-  print_inference_result app_id_y [("y", TypeVar "T")] "T";
+  (* Define a fuel limit for the normalization function *)
+  let fuel = 10 in
 
-  (* 3. K *)
-  let const_term = Abs ("x", Abs ("y", Var "x")) in
-  (* Résultat attendu : T1 -> (T2 -> T1) *)
-  print_inference_result const_term [] "(T1 -> (T2 -> T1))";
+  (* Print and evaluate term1 *)
+  Printf.printf "Evaluating term1: %s\n" (print_term term1);
+  (match ltr_cbv_norm' term1 fuel with
+   | Some result -> Printf.printf "Result: %s\n\n" (print_term result)
+   | None -> Printf.printf "Divergence detected in term1\n\n");
 
-  (* 4.K (z : T3) (w : T4)  *)
-  let const_app = App (App (const_term, Var "z"), Var "w") in
-  (* Résultat attendu : type de "z" (par exemple T3) *)
-  print_inference_result const_app [("z", TypeVar "T3"); ("w", TypeVar "T4")] "T3";
+  (* Print and evaluate term2 *)
+  Printf.printf "Evaluating term2: %s\n" (print_term term2);
+  (match ltr_cbv_norm' term2 fuel with
+   | Some result -> Printf.printf "Result: %s\n\n" (print_term result)
+   | None -> Printf.printf "Divergence detected in term2\n\n");
 
-  (* 5. Ω : divergence *)
-  let omega_term = App (Abs ("x", App (Var "x", Var "x")), Abs ("x", App (Var "x", Var "x"))) in
-  (* Résultat attendu : non typable ou boucle infinie *)
-  print_inference_result omega_term [] "non typable";
+  (* Print and evaluate term3 *)
+  Printf.printf "Evaluating term3: %s\n" (print_term term3);
+  (match ltr_cbv_norm' term3 fuel with
+   | Some result -> Printf.printf "Result: %s\n\n" (print_term result)
+   | None -> Printf.printf "Divergence detected in term3\n\n");
 
-  (* 6. S *)
-  let s_term = Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))) in
-  (* Résultat attendu : (T -> U -> V) -> (T -> U) -> T -> V *)
-  print_inference_result s_term [] "((T -> U -> V) -> (T -> U) -> T -> V)";
-
-  (* 7. S K K *)
-  let k_term = Abs ("x", Abs ("y", Var "x")) in
-  let skk_term = App (App (s_term, k_term), k_term) in
-  (* Résultat attendu : T -> T (fonction identité) *)
-  print_inference_result skk_term [] "(T -> T)";
-
-  (* 8. Application de Nat *)
-  let nat_app = Abs ("f", Abs ("x", App (Var "f", Var "x"))) in
-  (* Résultat attendu : (Nat -> Nat) -> Nat -> Nat *)
-  print_inference_result nat_app [("f", Arr (Nat, Nat)); ("x", Nat)] "((Nat -> Nat) -> Nat -> Nat)";
+  (* Print and evaluate term4 *)
+  Printf.printf "Evaluating term4: %s\n" (print_term term4);
+  (match ltr_cbv_norm' term4 fuel with
+   | Some result -> Printf.printf "Result: %s\n\n" (print_term result)
+   | None -> Printf.printf "Divergence detected in term4\n\n")
