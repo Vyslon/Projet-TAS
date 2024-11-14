@@ -23,17 +23,17 @@ let rec variablesLibres (t : pterm) : string list =
   | Abs (x, t1) -> List.filter (fun y -> y <> x) (variablesLibres t1)
 
 (* On remplace dans t chaque occurence de x par n *)
-let rec substitution (x : string) (n: pterm) (t : pterm) : pterm =
+let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
   match t with
   | Var k -> if (k = x) then n else Var k
-  | App (t1, t2) -> App(substitution x n t1, substitution x n t2)
+  | App (t1, t2) -> App(substitutions x n t1, substitutions x n t2)
   | Abs (k, tt) -> if (k = x) then Abs(k, tt) else
         if (List.mem k (variablesLibres n)) then
           let y' = nouvelle_var () in
-          let tt' = substitution k (Var y') tt in
-          Abs(y', substitution x n tt')
+          let tt' = substitutions k (Var y') tt in
+          Abs(y', substitutions x n tt')
         else
-          Abs (k, substitution x n tt)
+          Abs (k, substitutions x n tt)
 
 (* alpha-conversion *)
 let rec alphaconv (t : pterm) : pterm =
@@ -41,7 +41,7 @@ let rec alphaconv (t : pterm) : pterm =
   | Var x -> Var x
   | App (t1, t2) -> App(alphaconv t1, alphaconv t2)
   | Abs (x, tt) -> let x' = (nouvelle_var ()) in
-      Abs (x', alphaconv (substitution x (Var x') tt))
+      Abs (x', alphaconv (substitutions x (Var x') tt))
 
 (* Cette fonction détermine si le terme est une valeur ("V" dans le CM 2 p.21) *)
 let rec is_value (t : pterm) : bool =
@@ -68,7 +68,7 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
                 | Some t2' -> Some (App(t1, t2'))
                 | None ->
                     match t1, t2 with
-                    | Abs(str, t'), valeur when is_value valeur -> Some (substitution str valeur t')
+                    | Abs(str, t'), valeur when is_value valeur -> Some (substitutions str valeur t')
                     | _ -> None
 
 (* Appelle consécutivement ltr_ctb_step, pour normaliser un terme autant que possible *)
@@ -112,7 +112,7 @@ let nouvelle_var_t () : string =
   compteur_var_t := !compteur_var_t + 1;
   "T" ^ string_of_int !compteur_var_t
 
-(* Generate typing equations from a term *)
+(* Génère un système d'équations de typage depuis un terme *)
 let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
   match t with
   | Var x ->
@@ -127,11 +127,11 @@ let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
       (cible, Arr(ta, tr)) :: (genereTypage t' ((x, ta) :: e) tr)
   | App(t1, t2) ->
       let ta = TypeVar (nouvelle_var_t ()) in
-      let t1_eqs = genereTypage t1 e (Arr(ta, cible)) in
-      let t2_eqs = genereTypage t2 e ta in
-      t1_eqs @ t2_eqs
+      let t1Sys = genereTypage t1 e (Arr(ta, cible)) in
+      let t2Sys = genereTypage t2 e ta in
+      t1Sys @ t2Sys
 
-(* Vérifie si une variable de type apparaît dans un type (pour l'occur check) *)
+(* Vérifie si une variable de type apparaît dans un type *)
 let rec occurCheck (var : ptype) (unType : ptype) : bool =
   match var with
   | TypeVar x ->
@@ -142,122 +142,115 @@ let rec occurCheck (var : ptype) (unType : ptype) : bool =
       )
   | _ -> failwith "L'occurCheck ne peut être appelé que sur une variable de type"
 
-let rec egalite_type (t1 : ptype) ( t2 :ptype) : bool =
-  match t1,t2 with
-  | TypeVar s1, TypeVar s2 -> s1 = s2
-  | Arr (t11,t12), Arr(t21,t22) -> (egalite_type t11 t21) && (egalite_type t12 t22)
-  | Nat,Nat -> true
-  | _,_ -> false
+(* Vérifie l'égalité structurelle entre 2 types *)
+let rec egStructurelle (t1 : ptype) ( t2 : ptype) : bool =
+  match t1, t2 with
+  |(Nat, Nat) -> true
+  | (TypeVar x, TypeVar y) -> x = y
+  | (Arr (t1, t2), Arr(t3, t4)) -> (egStructurelle t1 t3) && (egStructurelle t2 t4)
+  | (_,_) -> false
 
-(* Define substitution type *)
-type substitution = (string * ptype) list
+(* Représente une liste de substitutions  *)
+type substitutions = (string * ptype) list
 
-(* Apply substitution to a type *)
-let rec apply_subst_to_type (subst : substitution) (t : ptype) : ptype =
+(* Applique une liste de substitutions à un type *)
+let rec substitutDansType (subst : substitutions) (t : ptype) : ptype =
   match t with
   | TypeVar x ->
       (match List.assoc_opt x subst with
-       | Some ty -> apply_subst_to_type subst ty
+       | Some ty -> substitutDansType subst ty
        | None -> t)
   | Arr (t1, t2) ->
-      Arr (apply_subst_to_type subst t1, apply_subst_to_type subst t2)
+      Arr (substitutDansType subst t1, substitutDansType subst t2)
   | Nat -> Nat
 
-(* Apply substitution to equations *)
-let apply_subst_to_equations (subst : substitution) (eqs : eqTypage) : eqTypage =
-  List.map (fun (t1, t2) -> (apply_subst_to_type subst t1, apply_subst_to_type subst t2)) eqs
+(* Applique une liste de substitutions *)
+let substitutDansEquation (subst : substitutions) (eqs : eqTypage) : eqTypage =
+  List.map (fun (t1, t2) -> (substitutDansType subst t1, substitutDansType subst t2)) eqs
 
-(* Unification step function *)
-let unify_step (equations : eqTypage) (subst : substitution) : (eqTypage * substitution) option =
+(* Applique une étape d'unification *)
+let unificationStep (equations : eqTypage) (subst : substitutions) : (eqTypage * substitutions) option =
   match equations with
-  | [] -> None  (* No equations left to process *)
-  | (t1, t2)::rest ->
-      let t1' = apply_subst_to_type subst t1 in
-      let t2' = apply_subst_to_type subst t2 in
-      if egalite_type t1' t2' then
-        Some (rest, subst)
+  | [] -> None
+  | (t1, t2)::ts ->
+      let t1' = substitutDansType subst t1 in
+      let t2' = substitutDansType subst t2 in
+      if egStructurelle t1' t2' then
+        Some (ts, subst)
       else
         match (t1', t2') with
         | (TypeVar x, t) | (t, TypeVar x) ->
             if occurCheck (TypeVar x) t then
-              None  (* Occurs check failed *)
+              None (* Problème dans l'unification *)
             else
               let subst' = (x, t)::subst in
-              let rest' = apply_subst_to_equations [(x, t)] rest in
-              Some (rest', subst')
+              let ts' = substitutDansEquation [(x, t)] ts in
+              Some (ts', subst')
         | (Arr (l1, r1), Arr (l2, r2)) ->
-            Some ((l1, l2)::(r1, r2)::rest, subst)
-        | _ -> None  (* Unification failed *)
+            Some ((l1, l2)::(r1, r2)::ts, subst)
+        | _ -> None
 
-(* Unification function with fuel *)
-let rec unify (equations : eqTypage) (subst : substitution) (fuel : int) : substitution option =
+(* Réalise l'unification jusqu'à ce qu'on ait épuisé notre fuel ou notre système d'équations *)
+let rec unify (equations : eqTypage) (subst : substitutions) (fuel : int) : substitutions option =
   if fuel <= 0 then None
   else
-    match unify_step equations subst with
+    match unificationStep equations subst with
     | None -> 
         if equations = [] then Some subst else None
-    | Some (new_eqs, new_subst) ->
-        unify new_eqs new_subst (fuel - 1)
+    | Some (nouvEquations, nouvSubstitutions) ->
+        unify nouvEquations nouvSubstitutions (fuel - 1)
 
-let rec print_substitution (subst : substitution) : string =
-  match subst with
-  | [] -> ""
-  | (x, t)::rest -> x ^ " = " ^ (print_type t) ^ "\n" ^ (print_substitution rest)
-
-(* Inference function *)
+(* Infère le type de t si possible *)
 let inference (t : pterm) (e : env) : ptype option =
   let ta = TypeVar (nouvelle_var_t ()) in
   let systeme = genereTypage t e ta in
   match unify systeme [] 1000 with
   | Some subst ->
-      let inferred_type = apply_subst_to_type subst ta in
-      (* For debugging: print the final substitutions *)
-      let _ = Printf.printf "Substitutions finales :\n%s" (print_substitution subst) in
-      Some inferred_type
+      let typeInfere = substitutDansType subst ta in
+      Some typeInfere
   | None -> None
 
 (* Fonction pour afficher les résultats de l'inférence de type *)
-let print_inference_result term env expected_type =
+let print_inference_result term env typeAttendu =
   Printf.printf "Terme : %s\n" (print_term term);
   match inference term env with
-  | Some inferred_type ->
-      Printf.printf "Type inféré : %s\n" (print_type inferred_type);
-      Printf.printf "Type attendu : %s\n\n" expected_type
+  | Some typeInfere ->
+      Printf.printf "Type inféré : %s\n" (print_type typeInfere);
+      Printf.printf "Type attendu : %s\n\n" typeAttendu
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
-(* Cas de test *)
 let () =
   (* 1. Identité *)
   let id_term = Abs ("x", Var "x") in
   (* Résultat attendu : T -> T *)
   print_inference_result id_term [] "(T -> T)";
 
-  (* 2. Application de l'identité à y *)
+  (* 2. Application de l'identité à y de type T *)
   let app_id_y = App (id_term, Var "y") in
   (* Résultat attendu : même type que "y" (par exemple T) *)
   print_inference_result app_id_y [("y", TypeVar "T")] "T";
 
-  (* 3. Fonction constante *)
+  (* 3. K *)
   let const_term = Abs ("x", Abs ("y", Var "x")) in
   (* Résultat attendu : T1 -> (T2 -> T1) *)
   print_inference_result const_term [] "(T1 -> (T2 -> T1))";
 
-  (* 4. Application de la fonction constante à z et w *)
+  (* 4.K (z : T3) (w : T4)  *)
   let const_app = App (App (const_term, Var "z"), Var "w") in
   (* Résultat attendu : type de "z" (par exemple T3) *)
   print_inference_result const_app [("z", TypeVar "T3"); ("w", TypeVar "T4")] "T3";
 
-  (* 5. Combinator Omega (divergence) *)
+  (* 5. Ω : divergence *)
   let omega_term = App (Abs ("x", App (Var "x", Var "x")), Abs ("x", App (Var "x", Var "x"))) in
   (* Résultat attendu : non typable ou boucle infinie *)
   print_inference_result omega_term [] "non typable";
 
-  (* 6. Combinator S *)
+  (* 6. S *)
   let s_term = Abs ("x", Abs ("y", Abs ("z", App (App (Var "x", Var "z"), App (Var "y", Var "z"))))) in
   (* Résultat attendu : (T -> U -> V) -> (T -> U) -> T -> V *)
   print_inference_result s_term [] "((T -> U -> V) -> (T -> U) -> T -> V)";
 
-  (* 7. Combinator S K K combinator (identité) *)
+  (* 7. S K K *)
   let k_term = Abs ("x", Abs ("y", Var "x")) in
   let skk_term = App (App (s_term, k_term), k_term) in
   (* Résultat attendu : T -> T (fonction identité) *)
