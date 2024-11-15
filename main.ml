@@ -9,6 +9,13 @@ type pterm =
   | Cons of pterm * pterm
   | Izte of pterm * pterm * pterm (* : Entier * pterm * pterm *)
   | Iete of pterm * pterm * pterm (* : Nil | Cons (pterm * pterm) * pterm * pterm *)
+  | Fix of pterm
+
+  (* type fixpoint = {
+    name : string;
+    abstraction : pterm;
+    env : (string * pterm) list;
+  } *)
 
 let is_empty (liste : pterm) : bool = 
   (liste = Nil)
@@ -56,6 +63,7 @@ let rec print_term (t : pterm) : string =
     "if " ^ (print_term entier) ^ " == 0 then " ^ (print_term consequent) ^ " else " ^ (print_term alternative)
   | Iete (liste, consequent, alternative) ->
     "if " ^ (print_term liste) ^ " == [] then " ^ (print_term consequent) ^ " else " ^ (print_term alternative)
+  | Fix x -> "(fix " ^ print_term x ^ ")"
 
 let compteur_var : int ref = ref 0
 
@@ -87,6 +95,7 @@ let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
   | Addition (t1, t2) -> Addition (substitutions x n t1, substitutions x n t2)
   | Soustraction (t1, t2) -> Soustraction (substitutions x n t1, substitutions x n t2)
   | Cons (t, ts) -> Cons (substitutions x n t, substitutions x n ts)
+  | Fix t -> Fix (substitutions x n t)
   | _ -> t
 
 (* alpha-conversion *)
@@ -200,6 +209,20 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
       | Some aReduction -> Some (Iete(liste, consequent, aReduction))
       | None -> Some alternative
       ))
+    | Fix f when is_value f ->
+        Printf.printf "Réduction de Fix : Application de %s à %s\n" (print_term f) (print_term (Fix f));
+        begin
+          match f with
+          | Abs (x, body) -> Some (substitutions x (Fix f) body)
+          | _ -> Some (App (f, Fix f))
+        end
+    | Fix f -> (
+        Printf.printf "Évaluation de l'argument de Fix : %s\n" (print_term f);
+        match ltr_ctb_step f with
+        | Some f' -> Some (Fix f')
+        | None -> None
+    )
+  
 
 (* TODO : vérifier que le conséquent ou l'alternative soit None*)
 
@@ -352,60 +375,37 @@ let print_inference_result term env typeAttendu =
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
 
-
 let () =
-  (* Définir des termes à tester *)
-
-  (* Test 1 : Izte avec une condition vraie et des opérations complexes dans les branches *)
-  let term1 = Izte (Entier 0, Soustraction (Entier 21, Entier 9), App (Abs ("x", Addition (Var "x", Entier 3)), Entier 2)) in
-
-  (* Test 2 : Izte avec une condition fausse et une abstraction dans then et else *)
-  let term2 = Izte (Entier 5, Abs ("x", Soustraction (Var "x", Entier 1)), Abs ("y", Addition (Var "y", Entier 42))) in
-
-  (* Test 3 : Izte avec une condition calculée et une liste dans les branches *)
-  let term3 = Izte (Soustraction (Entier 3, Entier 3), Cons (Entier 1, Nil), Cons (Entier 2, Cons (Entier 3, Nil))) in
-
-  (* Test 4 : Izte avec une addition calculée et une application *)
-  let term4 = Izte (Addition (Entier 1, Entier (-1)), App (Abs ("z", Soustraction (Var "z", Entier 2)), Entier 8), Entier 600) in
-
-  (* Test 5 : Iete avec une liste vide et des abstractions dans les branches *)
-  let term5 = Iete (Nil, Abs ("x", Var "x"), App (Abs ("y", Addition (Var "y", Entier 5)), Entier 10)) in
-
-  (* Test 6 : Iete avec une liste non vide et une soustraction dans else *)
-  let term6 = Iete (Cons (Entier 42, Nil), Entier 1, Soustraction (Entier 50, Entier 8)) in
-
-  (* Test 7 : Iete avec une liste construite dynamiquement et une application *)
-  let term7 = Iete (Cons (Entier 1, Cons (Entier 2, Nil)), Entier 10, App (Abs ("x", Addition (Var "x", Entier 5)), Entier 3)) in
-
-  (* Test 8 : Iete avec une liste construite avec évaluation et une abstraction *)
-  let term8 = Iete (Cons (Addition (Entier 1, Entier 1), Nil), Abs ("x", Addition (Var "x", Entier 100)), Entier 200) in
-
-  (* Test 9 : Izte avec une condition et une liste complexe dans then/else *)
-  let term9 = Izte (Entier 0, Cons (Entier 10, Cons (Entier 20, Nil)), Cons (Entier 30, Nil)) in
-
-  (* Test 10 : Iete avec une liste imbriquée et une abstraction complexe *)
-  let term10 = Iete (Cons (Entier 1, Cons (Entier 2, Cons (Entier 3, Nil))), Abs ("x", App (Abs ("y", Addition (Var "x", Var "y")), Entier 5)), (Addition(Entier 1, Entier 3))) in
-
-  (* Définir une limite de carburant pour l'évaluation *)
-  let fuel = 100 in
-
-  (* Fonction pour tester et afficher les résultats *)
-  let test term description =
-    Printf.printf "Test : %s\n" description;
-    Printf.printf "Terme initial : %s\n" (print_term term);
-    match ltr_cbv_norm' term fuel with
-    | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-    | None -> Printf.printf "Échec de l'évaluation ou divergence.\n\n"
+  (* Définition de la fonctionnelle pour la factorielle *)
+  let fact_functional =
+    Abs ("f", (* Fonctionnelle prenant une fonction comme paramètre *)
+      Abs ("n", (* Argument pour lequel calculer la factorielle *)
+        Izte (Var "n", (* Si n == 0, retourne 1 *)
+              Entier 1,
+              Addition (Var "n", (* Sinon n * f(n-1) *)
+                        App (Var "f", Soustraction (Var "n", Entier 1))
+              )
+        )
+      )
+    )
   in
 
-  (* Lancer les tests *)
-  test term1 "Izte (0 == 0) avec soustraction et application";
-  test term2 "Izte (5 == 0) avec abstraction dans then et else";
-  test term3 "Izte ((3 - 3) == 0) avec liste dans then et else";
-  test term4 "Izte ((1 + (-1)) == 0) avec application dans then";
-  test term5 "Iete (liste vide) avec abstraction et application";
-  test term6 "Iete (liste non vide) avec soustraction dans else";
-  test term7 "Iete (liste dynamique) avec application dans else";
-  test term8 "Iete (liste avec évaluation) avec abstraction dans then";
-  test term9 "Izte (0 == 0) avec liste complexe dans then et else";
-  test term10 "Iete (liste imbriquée) avec abstraction complexe";
+  (* Combinateur de point fixe appliqué à la fonctionnelle *)
+  let factorial = Fix fact_functional in
+
+  (* Application de la factorielle à un entier *)
+  let test_case = App (factorial, Entier 5) in
+
+  (* Étape de normalisation *)
+  let rec ltr_cbv_norm_verbose t fuel =
+    Printf.printf "Étape (%d) : %s\n" fuel (print_term t);
+    match ltr_ctb_step t with
+    | Some t' -> if fuel > 0 then ltr_cbv_norm_verbose t' (fuel - 1) else None
+    | None -> Some t
+  in
+
+  (* Évaluation avec un "fuel" de 100 étapes *)
+  let fuel = 1000 in
+  match ltr_cbv_norm_verbose test_case fuel with
+  | Some result -> Printf.printf "Résultat avec fuel %d : %s\n" fuel (print_term result)
+  | None -> Printf.printf "Évaluation interrompue après %d étapes (divergence possible).\n" fuel
