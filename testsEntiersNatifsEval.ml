@@ -140,6 +140,7 @@ let () =
   test term9 "Izte (0 == 0) avec liste complexe dans then et else";
   test term10 "Iete (liste imbriquée) avec abstraction complexe";
 
+(* Tests point fixe *)
 let () =
   (* Fonctionnelle pour Fibonacci *)
   let fib_functional =
@@ -163,10 +164,91 @@ let () =
   let fib = Fix fib_functional in
 
   (* Application à un cas de test *)
-  let test_case = App (fib, Entier 9) in
+  let test_case = App (fib, Entier 10) in
 
   (* Évaluation avec un fuel *)
   let fuel = 1000 in
   match ltr_cbv_norm' test_case fuel with
   | Some result -> Printf.printf "Résultat avec fuel %d : %s\n" fuel (print_term result)
   | None -> Printf.printf "Évaluation interrompue après %d étapes (divergence possible).\n" fuel
+
+(* Tests let *)
+let () =
+  (* Test 1 : Let avec une simple définition et utilisation *)
+  let test1 =
+    Let ("x", Entier 5, Addition (Var "x", Entier 10))
+  in
+  Printf.printf "Test 1 : %s\n" (print_term test1);
+  (match ltr_cbv_norm' test1 100 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+  (* Test 2 : Let avec un calcul complexe *)
+  let test2 =
+    Let ("x", Addition (Entier 3, Entier 7),
+      Let ("y", Soustraction (Var "x", Entier 5),
+        Addition (Var "x", Var "y")))
+  in
+  Printf.printf "Test 2 : %s\n" (print_term test2);
+  (match ltr_cbv_norm' test2 100 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+  (* Test 3 : Let combiné avec Izte *)
+  let test3 =
+    Let ("x", Entier 0,
+      Izte (Var "x", Entier 1, Entier 42))
+  in
+  Printf.printf "Test 3 : %s\n" (print_term test3);
+  (match ltr_cbv_norm' test3 100 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+  (* Test 4 : Let combiné avec une définition récursive (Fibonacci avec Fix) *)
+  let fib_functional =
+    Abs ("f",
+      Abs ("n",
+        Izte (Var "n",
+              Entier 0,
+              Izte (Soustraction (Var "n", Entier 1),
+                    Entier 1,
+                    Addition (
+                      App (Var "f", Soustraction (Var "n", Entier 1)),
+                      App (Var "f", Soustraction (Var "n", Entier 2))
+                    )
+              )
+        )
+      )
+    )
+  in
+  let test4 =
+    Let ("fib", Fix fib_functional,
+      App (Var "fib", Entier 5))
+  in
+  Printf.printf "Test 4 : %s\n" (print_term test4);
+  (match ltr_cbv_norm' test4 500 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+  (* Test 5 : Let imbriqué avec des calculs complexes *)
+  let test5 =
+    Let ("x", Entier 2,
+      Let ("y", Addition (Var "x", Entier 3),
+        Let ("z", Soustraction (Var "y", Entier 1),
+          Addition (Var "z", Var "x"))))
+  in
+  Printf.printf "Test 5 : %s\n" (print_term test5);
+  (match ltr_cbv_norm' test5 100 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+  (* Test 6 : Let avec une évaluation partielle *)
+  let test6 =
+    Let ("x", Addition (Entier 2, Entier 3),
+      Let ("y", Var "x",
+        Soustraction (Var "y", Entier 1)))
+  in
+  Printf.printf "Test 6 : %s\n" (print_term test6);
+  (match ltr_cbv_norm' test6 100 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
