@@ -3,12 +3,18 @@ type pterm =
   | App of pterm * pterm
   | Abs of string * pterm
   | Entier of int
-  | Addition of pterm * pterm
-  | Soustraction of pterm * pterm
+  | Addition of pterm * pterm (* : Entier * Entier *)
+  | Soustraction of pterm * pterm (* : Entier * Entier *)
   | Nil (* Liste vide *)
   | Cons of pterm * pterm
+  | Izte of pterm * pterm * pterm (* : Entier * pterm * pterm *)
+  | Iete of pterm * pterm * pterm (* : Nil | Cons (pterm * pterm) * pterm * pterm *)
 
-let is_empty liste = (liste = Nil)
+let is_empty (liste : pterm) : bool = 
+  (liste = Nil)
+
+let is_zero (entier : pterm) : bool = 
+  (entier = (Entier 0))
 
 let is_liste (t : pterm) : bool =
   match t with
@@ -46,6 +52,10 @@ let rec print_term (t : pterm) : string =
       | (i, k) -> (print_term i) ^ " - " ^ (print_term k))
   | Nil -> "[]"
   | Cons (x, xs) -> print_term x ^ "::" ^ print_term xs
+  | Izte (entier, consequent, alternative) ->
+    "if " ^ (print_term entier) ^ " == 0 then " ^ (print_term consequent) ^ " else " ^ (print_term alternative)
+  | Iete (liste, consequent, alternative) ->
+    "if " ^ (print_term liste) ^ " == [] then " ^ (print_term consequent) ^ " else " ^ (print_term alternative)
 
 let compteur_var : int ref = ref 0
 
@@ -147,7 +157,7 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
           | None, Some k' -> Some (Soustraction (i, k'))
           | None, None -> None))
   | Nil -> None
-  | Cons(x, xs) ->
+  | Cons(x, xs) -> (
     let next = (ltr_ctb_step x) in
     match next with
     | Some reduction -> Some (Cons (reduction, xs)) (* TODO : lancer le step sur xs ? *)
@@ -155,7 +165,15 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
         match nextXS with
         | Some reductionXS -> Some (Cons(x, reductionXS))
         (* | None -> Some (Cons(x, xs)) *)
-        | None -> None
+        | None -> None)
+  | Izte(entier, consequent, alternative) -> (
+    match (ltr_ctb_step entier) with
+    | Some reduction -> Some (Izte(reduction, consequent, alternative))
+    | None -> if (is_zero entier) then (ltr_ctb_step consequent) else (ltr_ctb_step alternative))
+  | Iete(liste, consequent, alternative) -> (
+    match (ltr_ctb_step liste) with
+    | Some reduction -> Some (Iete(reduction, consequent, alternative))
+    | None -> if (is_empty liste) then (ltr_ctb_step consequent) else (ltr_ctb_step alternative))
 
 
 (* Appelle consécutivement ltr_ctb_step, pour normaliser un terme autant que possible *)
@@ -306,50 +324,54 @@ let print_inference_result term env typeAttendu =
       Printf.printf "Type attendu : %s\n\n" typeAttendu
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
-  let () =
-  (* Création de listes pour les tests *)
-  let liste1 = Cons (Entier 1, Cons (Entier 2, Cons (Entier 3, Nil))) in
-  let liste2 = Cons (Entier 4, liste1) in  (* [4, 1, 2, 3] *)
-  let liste3 = Cons (Addition (Entier 1, Entier 2), Cons (Entier 2, Cons ((Soustraction (Entier 8, Entier 2)), Nil))) in
-  let liste_vide = Nil in
 
-  (* Définition de la limite de carburant pour éviter les boucles infinies *)
-  let fuel = 1000 in
 
-  (* Test de l'évaluation de liste1 *)
-  Printf.printf "Évaluation de liste1: %s\n" (print_term liste1);
-  (match ltr_cbv_norm' liste1 fuel with
-   | Some result -> Printf.printf "Résultat: %s\n\n" (print_term result)
-   | None -> Printf.printf "Échec de l'évaluation ou divergence pour liste1\n\n");
 
-  (* Test de l'évaluation de liste2 *)
-  Printf.printf "Évaluation de liste2: %s\n" (print_term liste2);
-  (match ltr_cbv_norm' liste2 fuel with
-   | Some result -> Printf.printf "Résultat: %s\n\n" (print_term result)
-   | None -> Printf.printf "Échec de l'évaluation ou divergence pour liste2\n\n");
+let () =
+  (* Définir des termes à tester *)
+  
+  (* Test 1 : Izte avec une condition vraie (entier = 0) *)
+  let term1 = Izte (Entier 0, (Addition(Entier 12, Entier 21)), (Addition(Entier 3, Entier 4))) in
 
-    (* Test de l'évaluation de liste3 *)
-  Printf.printf "Évaluation de liste3: %s\n" (print_term liste3);
-  (match ltr_cbv_norm' liste3 fuel with
-   | Some result -> Printf.printf "Résultat: %s\n\n" (print_term result)
-   | None -> Printf.printf "Échec de l'évaluation ou divergence pour liste3\n\n");
+  (* Test 2 : Izte avec une condition fausse (entier != 0) *)
+  let term2 = Izte (Entier 5, Entier 42, (Soustraction(Entier 99, Entier 8))) in
 
-  (* Test de l'évaluation d'une liste vide *)
-  Printf.printf "Évaluation de liste_vide: %s\n" (print_term liste_vide);
-  (match ltr_cbv_norm' liste_vide fuel with
-   | Some result -> Printf.printf "Résultat: %s\n\n" (print_term result)
-   | None -> Printf.printf "Échec de l'évaluation ou divergence pour liste_vide\n\n");
+  (* Test 3 : Izte avec une condition calculée (3 - 3 = 0) *)
+  let term3 = Izte (Soustraction (Entier 3, Entier 3), Entier 100, Entier 200) in
 
-  (* Test de l'opération head sur liste1 *)
-  Printf.printf "Head de liste1: ";
-  (try Printf.printf "%s\n\n" (print_term (head liste1))
-   with Failure msg -> Printf.printf "Erreur: %s\n\n" msg);
+  (* Test 4 : Izte avec une condition calculée (1 + (-1) = 0) *)
+  let term4 = Izte (Addition (Entier 1, Entier (-1)), Entier 500, Entier 600) in
 
-  (* Test de l'opération queue sur liste1 *)
-  Printf.printf "Queue de liste1: ";
-  (try Printf.printf "%s\n\n" (print_term (queue liste1))
-   with Failure msg -> Printf.printf "Erreur: %s\n\n" msg);
+  (* Test 5 : Iete avec une liste vide *)
+  let term5 = Iete (Nil, Entier 1, Entier 0) in
 
-  (* Test de is_empty sur liste_vide et liste1 *)
-  Printf.printf "Liste_vide est vide? %b\n" (is_empty liste_vide);
-  Printf.printf "Liste1 est vide? %b\n\n" (is_empty liste1);
+  (* Test 6 : Iete avec une liste non vide *)
+  let term6 = Iete (Cons (Entier 42, Nil), Entier 1, Entier 0) in
+
+  (* Test 7 : Iete avec une liste construite dynamiquement *)
+  let term7 = Iete (Cons (Entier 1, Cons (Entier 2, Nil)), Entier 10, Entier 20) in
+
+  (* Test 8 : Iete avec une liste construite avec évaluation *)
+  let term8 = Iete (Cons (Addition (Entier 1, Entier 1), Nil), Entier 100, Entier 200) in
+
+  (* Définir une limite de carburant pour l'évaluation *)
+  let fuel = 100 in
+
+  (* Fonction pour tester et afficher les résultats *)
+  let test term description =
+    Printf.printf "Test : %s\n" description;
+    Printf.printf "Terme initial : %s\n" (print_term term);
+    match ltr_cbv_norm' term fuel with
+    | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+    | None -> Printf.printf "Échec de l'évaluation ou divergence.\n\n"
+  in
+
+  (* Lancer les tests *)
+  test term1 "Izte (0 == 0)";
+  test term2 "Izte (5 == 0)";
+  test term3 "Izte ((3 - 3) == 0)";
+  test term4 "Izte ((1 + (-1)) == 0)";
+  test term5 "Iete (liste vide)";
+  test term6 "Iete (liste non vide)";
+  test term7 "Iete (liste avec plusieurs éléments)";
+  test term8 "Iete (liste avec évaluation d'éléments)";
