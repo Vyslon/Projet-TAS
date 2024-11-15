@@ -1,4 +1,4 @@
-
+(* Tests des entiers, additions et soustractions *)
 let () =
   (* Define some sample terms *)
   let term1 = Addition (Entier 3, Entier 5) in
@@ -33,7 +33,7 @@ let () =
    | Some result -> Printf.printf "Result: %s\n\n" (print_term result)
    | None -> Printf.printf "Divergence detected in term4\n\n")
 
-(* TODO : listes*)
+(* Tests des listes*)
 let () =
   (* Création de listes pour les tests *)
   let liste1 = Cons (Entier 1, Cons (Entier 2, Cons (Entier 3, Nil))) in
@@ -81,3 +81,61 @@ let () =
   (* Test de is_empty sur liste_vide et liste1 *)
   Printf.printf "Liste_vide est vide? %b\n" (is_empty liste_vide);
   Printf.printf "Liste1 est vide? %b\n\n" (is_empty liste1);
+
+(* Tests d'Izte et Iete  *)
+let () =
+  (* Définir des termes à tester *)
+
+  (* Test 1 : Izte avec une condition vraie et des opérations complexes dans les branches *)
+  let term1 = Izte (Entier 0, Soustraction (Entier 21, Entier 9), App (Abs ("x", Addition (Var "x", Entier 3)), Entier 2)) in
+
+  (* Test 2 : Izte avec une condition fausse et une abstraction dans then et else *)
+  let term2 = Izte (Entier 5, Abs ("x", Soustraction (Var "x", Entier 1)), Abs ("y", Addition (Var "y", Entier 42))) in
+
+  (* Test 3 : Izte avec une condition calculée et une liste dans les branches *)
+  let term3 = Izte (Soustraction (Entier 3, Entier 3), Cons (Entier 1, Nil), Cons (Entier 2, Cons (Entier 3, Nil))) in
+
+  (* Test 4 : Izte avec une addition calculée et une application *)
+  let term4 = Izte (Addition (Entier 1, Entier (-1)), App (Abs ("z", Soustraction (Var "z", Entier 2)), Entier 8), Entier 600) in
+
+  (* Test 5 : Iete avec une liste vide et des abstractions dans les branches *)
+  let term5 = Iete (Nil, Abs ("x", Var "x"), App (Abs ("y", Addition (Var "y", Entier 5)), Entier 10)) in
+
+  (* Test 6 : Iete avec une liste non vide et une soustraction dans else *)
+  let term6 = Iete (Cons (Entier 42, Nil), Entier 1, Soustraction (Entier 50, Entier 8)) in
+
+  (* Test 7 : Iete avec une liste construite dynamiquement et une application *)
+  let term7 = Iete (Cons (Entier 1, Cons (Entier 2, Nil)), Entier 10, App (Abs ("x", Addition (Var "x", Entier 5)), Entier 3)) in
+
+  (* Test 8 : Iete avec une liste construite avec évaluation et une abstraction *)
+  let term8 = Iete (Cons (Addition (Entier 1, Entier 1), Nil), Abs ("x", Addition (Var "x", Entier 100)), Entier 200) in
+
+  (* Test 9 : Izte avec une condition et une liste complexe dans then/else *)
+  let term9 = Izte (Entier 0, Cons (Entier 10, Cons (Entier 20, Nil)), Cons (Entier 30, Nil)) in
+
+  (* Test 10 : Iete avec une liste imbriquée et une abstraction complexe *)
+  let term10 = Iete (Cons (Entier 1, Cons (Entier 2, Cons (Entier 3, Nil))), Abs ("x", App (Abs ("y", Addition (Var "x", Var "y")), Entier 5)), (Addition(Entier 1, Entier 3))) in
+
+  (* Définir une limite de carburant pour l'évaluation *)
+  let fuel = 100 in
+
+  (* Fonction pour tester et afficher les résultats *)
+  let test term description =
+    Printf.printf "Test : %s\n" description;
+    Printf.printf "Terme initial : %s\n" (print_term term);
+    match ltr_cbv_norm' term fuel with
+    | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+    | None -> Printf.printf "Échec de l'évaluation ou divergence.\n\n"
+  in
+
+  (* Lancer les tests *)
+  test term1 "Izte (0 == 0) avec soustraction et application";
+  test term2 "Izte (5 == 0) avec abstraction dans then et else";
+  test term3 "Izte ((3 - 3) == 0) avec liste dans then et else";
+  test term4 "Izte ((1 + (-1)) == 0) avec application dans then";
+  test term5 "Iete (liste vide) avec abstraction et application";
+  test term6 "Iete (liste non vide) avec soustraction dans else";
+  test term7 "Iete (liste dynamique) avec application dans else";
+  test term8 "Iete (liste avec évaluation) avec abstraction dans then";
+  test term9 "Izte (0 == 0) avec liste complexe dans then et else";
+  test term10 "Iete (liste imbriquée) avec abstraction complexe";
