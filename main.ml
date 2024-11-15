@@ -11,17 +11,8 @@ type pterm =
   | Iete of pterm * pterm * pterm (* : Nil | Cons (pterm * pterm) * pterm * pterm *)
   | Fix of pterm
 
-  (* type fixpoint = {
-    name : string;
-    abstraction : pterm;
-    env : (string * pterm) list;
-  } *)
-
 let is_empty (liste : pterm) : bool = 
   (liste = Nil)
-
-let is_zero (entier : pterm) : bool = 
-  (entier = (Entier 0))
 
 let is_liste (t : pterm) : bool =
   match t with
@@ -102,12 +93,6 @@ let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
     Iete (substitutions x n cond, substitutions x n then_branch, substitutions x n else_branch)
   | _ -> t
 
-(* Point fixe explicite *)
-let rec fix_apply (f : pterm) : pterm =
-  match f with
-  | Abs (x, body) -> Abs (x, substitutions x (fix_apply f) body)
-  | _ -> failwith "fix_apply requires an abstraction"
-
 (* alpha-conversion *)
 let rec alphaconv (t : pterm) : pterm =
   match t with
@@ -127,7 +112,6 @@ let rec is_value (t : pterm) : bool =
   | Soustraction(_, _) -> true
   | Entier _ -> true
   | _ -> false
-
 
 (* Effectue une étape de la stratégie LtR CbV *)
 let rec ltr_ctb_step (t : pterm) : pterm option =
@@ -189,7 +173,6 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
     | None -> let nextXS = (ltr_ctb_step xs) in
         match nextXS with
         | Some reductionXS -> Some (Cons(x, reductionXS))
-        (* | None -> Some (Cons(x, xs)) *)
         | None -> None)
   | Izte (Entier 0, consequent, _) -> Some consequent
   | Izte (Entier _, _, alternative) -> Some alternative
@@ -207,9 +190,6 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
     match f with
     | Abs (x, body) -> Some (substitutions x (Fix f) body)
     | _ -> failwith "Fix doit être appliqué à une abstraction")
-  
-
-(* TODO : vérifier que le conséquent ou l'alternative soit None*)
 
 (* Appelle consécutivement ltr_ctb_step, pour normaliser un terme autant que possible *)
 let rec ltr_cbv_norm (t : pterm) : pterm =
