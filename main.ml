@@ -96,7 +96,17 @@ let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
   | Soustraction (t1, t2) -> Soustraction (substitutions x n t1, substitutions x n t2)
   | Cons (t, ts) -> Cons (substitutions x n t, substitutions x n ts)
   | Fix t -> Fix (substitutions x n t)
+  | Izte (cond, then_branch, else_branch) ->
+    Izte (substitutions x n cond, substitutions x n then_branch, substitutions x n else_branch)
+  | Iete (cond, then_branch, else_branch) ->
+    Iete (substitutions x n cond, substitutions x n then_branch, substitutions x n else_branch)
   | _ -> t
+
+(* Point fixe explicite *)
+let rec fix_apply (f : pterm) : pterm =
+  match f with
+  | Abs (x, body) -> Abs (x, substitutions x (fix_apply f) body)
+  | _ -> failwith "fix_apply requires an abstraction"
 
 (* alpha-conversion *)
 let rec alphaconv (t : pterm) : pterm =
@@ -181,47 +191,22 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
         | Some reductionXS -> Some (Cons(x, reductionXS))
         (* | None -> Some (Cons(x, xs)) *)
         | None -> None)
-  | Izte(entier, consequent, alternative) -> (
-    match (ltr_ctb_step entier) with
-    | Some reduction -> Some (Izte(reduction, consequent, alternative))
-    | None -> if (is_zero entier) then (
-      let next = (ltr_ctb_step consequent) in
-      match next with
-      | Some cReduction -> Some (Izte(entier, cReduction, alternative))
-      | None -> Some consequent
-    ) else (
-      let next = (ltr_ctb_step alternative) in
-      match next with
-      | Some aReduction -> Some (Izte(entier, consequent, aReduction))
-      | None -> Some alternative
-      ))
-  | Iete(liste, consequent, alternative) -> (
-    match (ltr_ctb_step liste) with
-    | Some reduction -> Some (Iete(reduction, consequent, alternative))
-    | None -> if (is_empty liste) then (
-      let next = (ltr_ctb_step consequent) in
-      match next with
-      | Some cReduction -> Some (Iete(liste, cReduction, alternative))
-      | None -> Some consequent
-    ) else (
-      let next = (ltr_ctb_step alternative) in
-      match next with
-      | Some aReduction -> Some (Iete(liste, consequent, aReduction))
-      | None -> Some alternative
-      ))
-    | Fix f when is_value f ->
-        Printf.printf "Réduction de Fix : Application de %s à %s\n" (print_term f) (print_term (Fix f));
-        begin
-          match f with
-          | Abs (x, body) -> Some (substitutions x (Fix f) body)
-          | _ -> Some (App (f, Fix f))
-        end
-    | Fix f -> (
-        Printf.printf "Évaluation de l'argument de Fix : %s\n" (print_term f);
-        match ltr_ctb_step f with
-        | Some f' -> Some (Fix f')
-        | None -> None
-    )
+  | Izte (Entier 0, consequent, _) -> Some consequent
+  | Izte (Entier _, _, alternative) -> Some alternative
+  | Izte (x, consequent, alternative) -> (
+      match ltr_ctb_step x with
+      | Some x' -> Some (Izte (x', consequent, alternative))
+      | None -> None)
+  | Iete (Nil, consequent, _) -> Some consequent
+  | Iete (Cons(_, _), _, alternative) -> Some alternative
+  | Iete (x, consequent, alternative) -> (
+      match ltr_ctb_step x with
+      | Some x' -> Some (Iete (x', consequent, alternative))
+      | None -> None)
+  | Fix f -> (
+    match f with
+    | Abs (x, body) -> Some (substitutions x (Fix f) body)
+    | _ -> failwith "Fix doit être appliqué à une abstraction")
   
 
 (* TODO : vérifier que le conséquent ou l'alternative soit None*)
@@ -374,38 +359,33 @@ let print_inference_result term env typeAttendu =
       Printf.printf "Type attendu : %s\n\n" typeAttendu
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
-
 let () =
-  (* Définition de la fonctionnelle pour la factorielle *)
-  let fact_functional =
-    Abs ("f", (* Fonctionnelle prenant une fonction comme paramètre *)
-      Abs ("n", (* Argument pour lequel calculer la factorielle *)
-        Izte (Var "n", (* Si n == 0, retourne 1 *)
-              Entier 1,
-              Addition (Var "n", (* Sinon n * f(n-1) *)
-                        App (Var "f", Soustraction (Var "n", Entier 1))
+  (* Fonctionnelle pour Fibonacci *)
+  let fib_functional =
+    Abs ("f",
+      Abs ("n",
+        Izte (Var "n",
+              Entier 0,
+              Izte (Soustraction (Var "n", Entier 1),
+                    Entier 1,
+                    Addition (
+                      App (Var "f", Soustraction (Var "n", Entier 1)),
+                      App (Var "f", Soustraction (Var "n", Entier 2))
+                    )
               )
         )
       )
     )
   in
 
-  (* Combinateur de point fixe appliqué à la fonctionnelle *)
-  let factorial = Fix fact_functional in
+  (* Point fixe explicite *)
+  let fib = Fix fib_functional in
 
-  (* Application de la factorielle à un entier *)
-  let test_case = App (factorial, Entier 5) in
+  (* Application à un cas de test *)
+  let test_case = App (fib, Entier 10) in
 
-  (* Étape de normalisation *)
-  let rec ltr_cbv_norm_verbose t fuel =
-    Printf.printf "Étape (%d) : %s\n" fuel (print_term t);
-    match ltr_ctb_step t with
-    | Some t' -> if fuel > 0 then ltr_cbv_norm_verbose t' (fuel - 1) else None
-    | None -> Some t
-  in
-
-  (* Évaluation avec un "fuel" de 100 étapes *)
+  (* Évaluation avec un fuel *)
   let fuel = 1000 in
-  match ltr_cbv_norm_verbose test_case fuel with
+  match ltr_cbv_norm' test_case fuel with
   | Some result -> Printf.printf "Résultat avec fuel %d : %s\n" fuel (print_term result)
   | None -> Printf.printf "Évaluation interrompue après %d étapes (divergence possible).\n" fuel

@@ -139,3 +139,34 @@ let () =
   test term8 "Iete (liste avec évaluation) avec abstraction dans then";
   test term9 "Izte (0 == 0) avec liste complexe dans then et else";
   test term10 "Iete (liste imbriquée) avec abstraction complexe";
+
+let () =
+  (* Fonctionnelle pour Fibonacci *)
+  let fib_functional =
+    Abs ("f",
+      Abs ("n",
+        Izte (Var "n",
+              Entier 0,
+              Izte (Soustraction (Var "n", Entier 1),
+                    Entier 1,
+                    Addition (
+                      App (Var "f", Soustraction (Var "n", Entier 1)),
+                      App (Var "f", Soustraction (Var "n", Entier 2))
+                    )
+              )
+        )
+      )
+    )
+  in
+
+  (* Point fixe explicite *)
+  let fib = Fix fib_functional in
+
+  (* Application à un cas de test *)
+  let test_case = App (fib, Entier 9) in
+
+  (* Évaluation avec un fuel *)
+  let fuel = 1000 in
+  match ltr_cbv_norm' test_case fuel with
+  | Some result -> Printf.printf "Résultat avec fuel %d : %s\n" fuel (print_term result)
+  | None -> Printf.printf "Évaluation interrompue après %d étapes (divergence possible).\n" fuel
