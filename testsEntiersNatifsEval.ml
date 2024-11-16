@@ -69,14 +69,14 @@ let () =
   | None -> Printf.printf "Échec de l'évaluation ou divergence pour liste_vide\n\n");
 
   (* Test de l'opération head sur liste1 *)
-  Printf.printf "Head de liste1: ";
+  (* Printf.printf "Head de liste1: ";
   (try Printf.printf "%s\n\n" (print_term (head liste1))
-  with Failure msg -> Printf.printf "Erreur: %s\n\n" msg);
+  with Failure msg -> Printf.printf "Erreur: %s\n\n" msg); *)
 
   (* Test de l'opération queue sur liste1 *)
-  Printf.printf "Queue de liste1: ";
+  (* Printf.printf "Queue de liste1: ";
   (try Printf.printf "%s\n\n" (print_term (queue liste1))
-  with Failure msg -> Printf.printf "Erreur: %s\n\n" msg);
+  with Failure msg -> Printf.printf "Erreur: %s\n\n" msg); *)
 
   (* Test de is_empty sur liste_vide et liste1 *)
   Printf.printf "Liste_vide est vide? %b\n" (is_empty liste_vide);
@@ -252,3 +252,32 @@ let () =
   (match ltr_cbv_norm' test6 100 with
    | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
    | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+(* Tests typage entier, addition et soustraction *)
+let () =
+  (* Test 1 : Inférence de type pour un entier *)
+  let term1 = Entier 42 in
+  let env1 = [] in
+  print_inference_result term1 env1;
+
+  (* Test 2 : Inférence de type pour une addition *)
+  let term2 = Addition (Entier 5, Entier 3) in
+  let env2 = [] in
+  print_inference_result term2 env2;
+
+  (* Test 3 : Inférence de type pour une soustraction *)
+  let term3 = Soustraction (Entier 10, Entier 4) in
+  let env3 = [] in
+  print_inference_result term3 env3;
+
+  (* Test 4 : Inférence de type pour une fonction d'addition partielle *)
+  let term4 = Abs ("x", Addition (Var "x", Entier 7)) in
+  let env4 = [] in
+  print_inference_result term4 env4;
+
+  (* Test 5 : Inférence de type pour une fonction polymorphe *)
+  let term5 = Abs ("x", Abs ("y", Addition (Var "x", Var "y"))) in
+  let env5 = [] in
+  print_inference_result term5 env5;
+
+  Printf.printf "Tous les tests d'inférence de type sont terminés.\n";

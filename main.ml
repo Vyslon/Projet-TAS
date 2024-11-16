@@ -12,6 +12,7 @@ type pterm =
   | Fix of pterm
   | Let of string * pterm * pterm
 
+
 let is_empty (liste : pterm) : bool = 
   (liste = Nil)
 
@@ -212,12 +213,14 @@ type ptype =
     TypeVar of string
   | Arr of ptype * ptype
   | N (* entier *)
+  | Liste of ptype
 
 let rec print_type (t : ptype) : string =
   match t with
     TypeVar x -> x
   | Arr (t1, t2) -> "(" ^ (print_type t1) ^" -> "^ (print_type t2) ^")"
   | N -> "entier"
+  | Liste x -> "Liste " ^ print_type x
 
 type eqTypage = (ptype * ptype) list
 
@@ -250,7 +253,6 @@ let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
       let tr = TypeVar (nouvelle_var_t ()) in
       (cible, Arr(ta, tr)) :: (genereTypage t' ((x, ta) :: e) tr)
   | App(t1, t2) ->
-      let _ = Printf.printf "t1 : %s t2 : %s\n" (print_term t1) (print_term t2) in
       let ta = TypeVar (nouvelle_var_t ()) in
       let t1Sys = genereTypage t1 e (Arr(ta, cible)) in
       let t2Sys = genereTypage t2 e ta in
@@ -258,6 +260,11 @@ let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
   | Entier _ -> [(cible, N)]
   | Addition(x, y) -> (genereTypage x e N) @ (genereTypage y e N) @ [(cible, N)]
   | Soustraction(x, y) -> (genereTypage x e N) @ (genereTypage y e N) @ [(cible, N)]
+  | Nil -> [(cible, Liste (TypeVar (nouvelle_var_t ())))]
+  | Cons(x, xs) ->
+    let tElem = TypeVar (nouvelle_var_t ()) in
+    let tListe = Liste tElem in
+    (genereTypage x e tElem) @ (genereTypage xs e tListe) @ [(cible, tListe)]
 
 (* Vérifie si une variable de type apparaît dans un type *)
 let rec occurCheck (var : ptype) (unType : ptype) : bool =
@@ -267,6 +274,7 @@ let rec occurCheck (var : ptype) (unType : ptype) : bool =
       | TypeVar t -> (x = t)
       | Arr(t1, t2) -> (occurCheck var t1) || (occurCheck var t2)
       | N -> false
+      | Liste t -> (occurCheck var t)
       )
   | _ -> failwith "L'occurCheck ne peut être appelé que sur une variable de type"
 
@@ -276,6 +284,10 @@ let rec egStructurelle (t1 : ptype) ( t2 : ptype) : bool =
   | (N, N) -> true
   | (TypeVar x, TypeVar y) -> x = y
   | (Arr (t1, t2), Arr(t3, t4)) -> (egStructurelle t1 t3) && (egStructurelle t2 t4)
+  (* | (Nil, Nil) -> true
+  | (Nil, Liste _) -> true
+  | (Liste _, Nil) -> true *)
+  | (Liste x, Liste y) -> egStructurelle x y
   | (_,_) -> false
 
 (* Représente une liste de substitutions  *)
@@ -291,6 +303,7 @@ let rec substitutDansType (subst : substitutions) (t : ptype) : ptype =
   | Arr (t1, t2) ->
       Arr (substitutDansType subst t1, substitutDansType subst t2)
   | N -> N
+  | Liste x -> Liste (substitutDansType subst x)
 
 (* Applique une liste de substitutions *)
 let substitutDansEquation (subst : substitutions) (eqs : eqTypage) : eqTypage =
@@ -317,6 +330,7 @@ let unification_step (equations : eqTypage) (subst : substitutions) : (eqTypage 
         | (Arr (l1, r1), Arr (l2, r2)) ->
             Some ((l1, l2)::(r1, r2)::ts, subst)
         | (N, N) -> Some (ts, subst)
+        | (Liste x, Liste t) -> Some ((x, t)::ts, subst)
         | _ -> None
 
 (* Réalise l'unification jusqu'à ce qu'on ait épuisé notre fuel ou notre système d'équations *)
@@ -349,30 +363,65 @@ let print_inference_result term env =
 
 
 
+
+
 let () =
-  (* Test 1 : Inférence de type pour un entier *)
-  let term1 = Entier 42 in
-  let env1 = [] in
-  print_inference_result term1 env1;
-
-  (* Test 2 : Inférence de type pour une addition *)
-  let term2 = Addition (Entier 5, Entier 3) in
-  let env2 = [] in
-  print_inference_result term2 env2;
-
-  (* Test 3 : Inférence de type pour une soustraction *)
-  let term3 = Soustraction (Entier 10, Entier 4) in
-  let env3 = [] in
-  print_inference_result term3 env3;
-
-  (* Test 4 : Inférence de type pour une fonction d'addition partielle *)
-  let term4 = Abs ("x", Addition (Var "x", Entier 7)) in
-  let env4 = [] in
-  print_inference_result term4 env4;
-
-  (* Test 5 : Inférence de type pour une fonction polymorphe *)
-  let term5 = Abs ("x", Abs ("y", Addition (Var "x", Var "y"))) in
-  let env5 = [] in
-  print_inference_result term5 env5;
-
-  Printf.printf "Tous les tests d'inférence de type sont terminés.\n";
+    Printf.printf "===== TESTS D'INFERENCE DE TYPE =====\n";
+  
+    (* Test 1 : Liste vide *)
+    let term1 = Nil in
+    let env1 = [] in
+    Printf.printf "Test 1 : Liste vide\n";
+    print_inference_result term1 env1;
+  
+    (* Test 2 : Liste avec un entier *)
+    let term2 = Cons (Entier 1, Nil) in
+    let env2 = [] in
+    Printf.printf "Test 2 : Liste avec un entier\n";
+    print_inference_result term2 env2;
+  
+    (* Test 3 : Liste avec plusieurs entiers *)
+    let term3 = Cons (Entier 1, Cons (Entier 2, Nil)) in
+    let env3 = [] in
+    Printf.printf "Test 3 : Liste avec plusieurs entiers\n";
+    print_inference_result term3 env3;
+  
+    (* Test 4 : Fonction retournant une liste *)
+    let term4 = Abs ("x", Cons (Var "x", Nil)) in
+    let env4 = [] in
+    Printf.printf "Test 4 : Fonction retournant une liste\n";
+    print_inference_result term4 env4;
+  
+    (* Test 5 : Fonction ajoutant un élément à une liste *)
+    let term5 = Abs ("x", Abs ("y", Cons (Var "x", Var "y"))) in
+    let env5 = [] in
+    Printf.printf "Test 5 : Fonction ajoutant un élément à une liste\n";
+    print_inference_result term5 env5;
+  
+    (* Test 6 : Application d'une fonction sur une liste *)
+    let term6 = App (Abs ("x", Cons (Var "x", Nil)), Entier 42) in
+    let env6 = [] in
+    Printf.printf "Test 6 : Application d'une fonction sur une liste\n";
+    print_inference_result term6 env6;
+  
+    (* Test 7 : Fonction qui construit une liste de deux éléments *)
+    let term7 = Abs ("x", Abs ("y", Cons (Var "x", Cons (Var "y", Nil)))) in
+    let env7 = [] in
+    Printf.printf "Test 7 : Fonction qui construit une liste de deux éléments\n";
+    print_inference_result term7 env7;
+  
+    (* Test 8 : Normalisation et typage d'une fonction qui concatène deux listes *)
+    let term8 = Abs ("x", Abs ("y", App (App (Var "concat", Var "x"), Var "y"))) in
+    let env8 = [("concat", Arr (Liste (TypeVar "T"), Arr (Liste (TypeVar "T"), Liste (TypeVar "T"))))] in
+    Printf.printf "Test 8 : Normalisation et typage d'une fonction qui concatène deux listes\n";
+    let norm_term8 = ltr_cbv_norm' term8 100 in
+    (match norm_term8 with
+    | Some t -> print_inference_result t env8
+    | None -> Printf.printf "Échec de la normalisation.\n");
+  
+    (* Test 9 : Liste de listes *)
+    let term9 = Cons (Cons (Entier 1, Nil), Cons (Cons (Entier 2, Nil), Nil)) in
+    let env9 = [] in
+    Printf.printf "Test 9 : Liste de listes\n";
+    print_inference_result term9 env9;
+  
