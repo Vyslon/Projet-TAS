@@ -253,31 +253,62 @@ let () =
    | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
    | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
 
-(* Tests typage entier, addition et soustraction *)
+(* Tests head et tail *)
 let () =
-  (* Test 1 : Inférence de type pour un entier *)
-  let term1 = Entier 42 in
-  let env1 = [] in
-  print_inference_result term1 env1;
-
-  (* Test 2 : Inférence de type pour une addition *)
-  let term2 = Addition (Entier 5, Entier 3) in
-  let env2 = [] in
-  print_inference_result term2 env2;
-
-  (* Test 3 : Inférence de type pour une soustraction *)
-  let term3 = Soustraction (Entier 10, Entier 4) in
-  let env3 = [] in
-  print_inference_result term3 env3;
-
-  (* Test 4 : Inférence de type pour une fonction d'addition partielle *)
-  let term4 = Abs ("x", Addition (Var "x", Entier 7)) in
-  let env4 = [] in
-  print_inference_result term4 env4;
-
-  (* Test 5 : Inférence de type pour une fonction polymorphe *)
-  let term5 = Abs ("x", Abs ("y", Addition (Var "x", Var "y"))) in
-  let env5 = [] in
-  print_inference_result term5 env5;
-
-  Printf.printf "Tous les tests d'inférence de type sont terminés.\n";
+   Printf.printf "===== TESTS D'EVALUATION AVEC ltr_cbv_norm' =====\n";
+ 
+   (* Fonction pour afficher le résultat d'une évaluation *)
+   let print_evaluation_result term =
+       Printf.printf "Terme initial : %s\n" (print_term term);
+       match ltr_cbv_norm' term 100 with
+       | Some t -> Printf.printf "Résultat de l'évaluation : %s\n\n" (print_term t)
+       | None -> Printf.printf "Échec de la normalisation (divergence ou carburant épuisé).\n\n"
+   in
+ 
+   (* Test 1 : Head d'une liste concrète *)
+   let term1 = Head (Cons (Entier 1, Nil)) in
+   Printf.printf "Test 1 : Head d'une liste concrète\n";
+   print_evaluation_result term1;
+ 
+   (* Test 2 : Tail d'une liste concrète *)
+   let term2 = Tail (Cons (Entier 1, Cons (Entier 2, Nil))) in
+   Printf.printf "Test 2 : Tail d'une liste concrète\n";
+   print_evaluation_result term2;
+ 
+   (* Test 3 : Fonction utilisant Head *)
+   let term3 = App (Abs ("x", Head (Var "x")), Cons (Entier 1, Nil)) in
+   Printf.printf "Test 3 : Fonction utilisant Head\n";
+   print_evaluation_result term3;
+ 
+   (* Test 4 : Fonction utilisant Tail *)
+   let term4 = App (Abs ("x", Tail (Var "x")), Cons (Entier 1, Cons (Entier 2, Nil))) in
+   Printf.printf "Test 4 : Fonction utilisant Tail\n";
+   print_evaluation_result term4;
+ 
+   (* Test 5 : Fonction retournant une liste manipulée avec Head et Tail *)
+   let term5 = Abs ("x", Cons (Head (Var "x"), Tail (Var "x"))) in
+   Printf.printf "Test 5 : Fonction retournant une liste manipulée avec Head et Tail\n";
+   print_evaluation_result term5;
+ 
+   (* Test 6 : Evaluation d'une liste complexe avec Head et Tail *)
+   let term6 = App (Abs ("x", Cons (Head (Var "x"), Tail (Var "x"))), Cons (Entier 1, Cons (Entier 2, Nil))) in
+   Printf.printf "Test 6 : Evaluation d'une liste complexe avec Head et Tail\n";
+   print_evaluation_result term6;
+ 
+   (* Test 7 : Head sur une liste polymorphe *)
+   let term7 = App (Abs ("x", Head (Var "x")), Cons (Entier 1, Cons (Entier 2, Nil))) in
+   Printf.printf "Test 7 : Head sur une liste polymorphe\n";
+   print_evaluation_result term7;
+ 
+   (* Test 8 : Tail sur une liste polymorphe *)
+   let term8 = App (Abs ("x", Tail (Var "x")), Cons (Entier 1, Cons (Entier 2, Nil))) in
+   Printf.printf "Test 8 : Tail sur une liste polymorphe\n";
+   print_evaluation_result term8;
+ 
+   (* Test 9 : Évaluation récursive avec Fix *)
+   let term9 = App (Fix (Abs ("f", Abs ("x", Izte (Var "x", Entier 0, App (Var "f", Soustraction (Var "x", Entier 1)))))), Entier 3) in
+   Printf.printf "Test 9 : Évaluation récursive avec Fix (compte à rebours)\n";
+   print_evaluation_result term9;
+ 
+   Printf.printf "===== FIN DES TESTS =====\n";
+ 

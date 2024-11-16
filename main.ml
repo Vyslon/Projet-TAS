@@ -11,7 +11,8 @@ type pterm =
   | Iete of pterm * pterm * pterm (* : Nil | Cons (pterm * pterm) * pterm * pterm *)
   | Fix of pterm
   | Let of string * pterm * pterm
-
+  | Head of pterm
+  | Tail of pterm
 
 let is_empty (liste : pterm) : bool = 
   (liste = Nil)
@@ -19,18 +20,6 @@ let is_empty (liste : pterm) : bool =
 let is_liste (t : pterm) : bool =
   match t with
   | _ -> failwith "TODO"
-
-let head (liste : pterm) : pterm =
-  match liste with
-  | Nil -> failwith "Liste vide"
-  | Cons (x, _) -> x
-  | _ -> failwith "Appel de la fonction head sur un terme qui n'est pas une liste"
-
-let queue (liste : pterm) : pterm =
-  match liste with
-  | Nil -> failwith "Liste vide"
-  | Cons (_, xs) -> xs
-  | _ -> failwith "Appel de la fonction tail sur un terme qui n'est pas une liste"
 
 let rec print_term (t : pterm) : string =
   match t with
@@ -58,6 +47,8 @@ let rec print_term (t : pterm) : string =
     "if " ^ (print_term liste) ^ " == [] then " ^ (print_term consequent) ^ " else " ^ (print_term alternative)
   | Fix x -> "(fix " ^ print_term x ^ ")"
   | Let (x, e1, e2) -> "let " ^ x ^ " = " ^ print_term e1 ^ " in (" ^ print_term e2 ^ ")"
+  | Head x -> "head " ^ print_term x
+  | Tail x -> "tail " ^ print_term x
 
 let compteur_var : int ref = ref 0
 
@@ -66,6 +57,7 @@ let nouvelle_var () : string =
   "X"^(string_of_int !compteur_var)
 
 (* Donne la liste des variables libres dans le terme t *)
+(* TODO : mettre à jour ? *)
 let rec variablesLibres (t : pterm) : string list =
   match t with
   | Var x -> [x]
@@ -74,7 +66,6 @@ let rec variablesLibres (t : pterm) : string list =
   | _ -> []
 
 (* On remplace dans t chaque occurence de x par n *)
-(* TODO : modifier aussi *)
 let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
   match t with
   | Var k -> if (k = x) then n else Var k
@@ -95,6 +86,8 @@ let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
   | Iete (cond, then_branch, else_branch) ->
     Iete (substitutions x n cond, substitutions x n then_branch, substitutions x n else_branch)
   | Let (k, e1, e2) -> Let(k, (substitutions x n e1), (substitutions x n e2))
+  | Head ts -> Head (substitutions x n ts)
+  | Tail ts -> Tail (substitutions x n ts)
   | _ -> t
 
 (* alpha-conversion *)
@@ -115,6 +108,8 @@ let rec is_value (t : pterm) : bool =
   | Addition(_, _) -> true
   | Soustraction(_, _) -> true
   | Entier _ -> true
+  | Head _ -> true
+  | Tail _ -> true
   | _ -> false
 
 (* Effectue une étape de la stratégie LtR CbV *)
@@ -126,14 +121,14 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
       | Some t1' -> Some (Abs (x, t1'))
       | None -> None)
   | App(t1, t2) -> (
-      match ltr_ctb_step t1 with
-      | Some t1' -> Some (App(t1', t2))
-      | None -> match ltr_ctb_step t2 with
-                | Some t2' -> Some (App(t1, t2'))
-                | None ->
-                    match t1, t2 with
-                    | Abs(str, t'), valeur when is_value valeur -> Some (substitutions str valeur t')
-                    | _ -> None)
+    match ltr_ctb_step t1 with
+    | Some t1' -> Some (App(t1', t2)) (* Réduire t1 si possible *)
+    | None -> match ltr_ctb_step t2 with
+              | Some t2' -> Some (App(t1, t2')) (* Réduire t2 si possible *)
+              | None -> (
+                  match t1 with
+                  | Abs(str, t') -> Some (substitutions str t2 t') (* Réduire directement l'application *)
+                  | _ -> None)) (* Sinon, pas de réduction possible *)
   | Entier x -> None (* Déjà une valeur, donc rien à réduire *)
   | Addition (x, y) -> (
       match (x, y) with 
@@ -178,6 +173,21 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
         match nextXS with
         | Some reductionXS -> Some (Cons(x, reductionXS))
         | None -> None)
+  | Head x -> (
+    let next = (ltr_ctb_step x) in
+    match next with
+    | Some red -> Some (Head(red))
+    | None -> match x with
+      | Cons (xt, _) -> Some xt
+      | _ -> None)
+  | Tail x -> (
+    let next = (ltr_ctb_step x) in
+    match next with
+    | Some red -> Some (Tail(red))
+    | None -> match x with
+      | Cons (xt, Nil) -> Some xt
+      | Cons (xt, xts) -> (ltr_ctb_step (Tail(xts)))
+      | _ -> None)
   | Izte (Entier 0, consequent, _) -> Some consequent
   | Izte (Entier _, _, alternative) -> Some alternative
   | Izte (x, consequent, alternative) -> (
@@ -265,6 +275,14 @@ let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
     let tElem = TypeVar (nouvelle_var_t ()) in
     let tListe = Liste tElem in
     (genereTypage x e tElem) @ (genereTypage xs e tListe) @ [(cible, tListe)]
+  | Head x ->
+    let tElem = TypeVar (nouvelle_var_t ()) in
+    let tListe = Liste tElem in
+    (genereTypage x e tListe) @ [(cible, tElem)]
+  | Tail x ->
+    let tElem = TypeVar (nouvelle_var_t ()) in
+    let tListe = Liste tElem in
+    (genereTypage x e tListe) @ [(cible, tElem)]
 
 (* Vérifie si une variable de type apparaît dans un type *)
 let rec occurCheck (var : ptype) (unType : ptype) : bool =
@@ -284,9 +302,6 @@ let rec egStructurelle (t1 : ptype) ( t2 : ptype) : bool =
   | (N, N) -> true
   | (TypeVar x, TypeVar y) -> x = y
   | (Arr (t1, t2), Arr(t3, t4)) -> (egStructurelle t1 t3) && (egStructurelle t2 t4)
-  (* | (Nil, Nil) -> true
-  | (Nil, Liste _) -> true
-  | (Liste _, Nil) -> true *)
   | (Liste x, Liste y) -> egStructurelle x y
   | (_,_) -> false
 
@@ -362,66 +377,82 @@ let print_inference_result term env =
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
 
-
-
-
 let () =
-    Printf.printf "===== TESTS D'INFERENCE DE TYPE =====\n";
-  
-    (* Test 1 : Liste vide *)
-    let term1 = Nil in
-    let env1 = [] in
-    Printf.printf "Test 1 : Liste vide\n";
-    print_inference_result term1 env1;
-  
-    (* Test 2 : Liste avec un entier *)
-    let term2 = Cons (Entier 1, Nil) in
-    let env2 = [] in
-    Printf.printf "Test 2 : Liste avec un entier\n";
-    print_inference_result term2 env2;
-  
-    (* Test 3 : Liste avec plusieurs entiers *)
-    let term3 = Cons (Entier 1, Cons (Entier 2, Nil)) in
-    let env3 = [] in
-    Printf.printf "Test 3 : Liste avec plusieurs entiers\n";
-    print_inference_result term3 env3;
-  
-    (* Test 4 : Fonction retournant une liste *)
-    let term4 = Abs ("x", Cons (Var "x", Nil)) in
-    let env4 = [] in
-    Printf.printf "Test 4 : Fonction retournant une liste\n";
-    print_inference_result term4 env4;
-  
-    (* Test 5 : Fonction ajoutant un élément à une liste *)
-    let term5 = Abs ("x", Abs ("y", Cons (Var "x", Var "y"))) in
-    let env5 = [] in
-    Printf.printf "Test 5 : Fonction ajoutant un élément à une liste\n";
-    print_inference_result term5 env5;
-  
-    (* Test 6 : Application d'une fonction sur une liste *)
-    let term6 = App (Abs ("x", Cons (Var "x", Nil)), Entier 42) in
-    let env6 = [] in
-    Printf.printf "Test 6 : Application d'une fonction sur une liste\n";
-    print_inference_result term6 env6;
-  
-    (* Test 7 : Fonction qui construit une liste de deux éléments *)
-    let term7 = Abs ("x", Abs ("y", Cons (Var "x", Cons (Var "y", Nil)))) in
-    let env7 = [] in
-    Printf.printf "Test 7 : Fonction qui construit une liste de deux éléments\n";
-    print_inference_result term7 env7;
-  
-    (* Test 8 : Normalisation et typage d'une fonction qui concatène deux listes *)
-    let term8 = Abs ("x", Abs ("y", App (App (Var "concat", Var "x"), Var "y"))) in
-    let env8 = [("concat", Arr (Liste (TypeVar "T"), Arr (Liste (TypeVar "T"), Liste (TypeVar "T"))))] in
-    Printf.printf "Test 8 : Normalisation et typage d'une fonction qui concatène deux listes\n";
-    let norm_term8 = ltr_cbv_norm' term8 100 in
-    (match norm_term8 with
-    | Some t -> print_inference_result t env8
-    | None -> Printf.printf "Échec de la normalisation.\n");
-  
-    (* Test 9 : Liste de listes *)
-    let term9 = Cons (Cons (Entier 1, Nil), Cons (Cons (Entier 2, Nil), Nil)) in
-    let env9 = [] in
-    Printf.printf "Test 9 : Liste de listes\n";
-    print_inference_result term9 env9;
-  
+  (* Test 1 : Let avec une simple définition et utilisation *)
+  let test1 =
+    Let ("x", Entier 5, Addition (Var "x", Entier 10))
+  in
+  Printf.printf "Test 1 : %s\n" (print_term test1);
+  (match ltr_cbv_norm' test1 100 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+  (* Test 2 : Let avec un calcul complexe *)
+  let test2 =
+    Let ("x", Addition (Entier 3, Entier 7),
+      Let ("y", Soustraction (Var "x", Entier 5),
+        Addition (Var "x", Var "y")))
+  in
+  Printf.printf "Test 2 : %s\n" (print_term test2);
+  (match ltr_cbv_norm' test2 100 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+  (* Test 3 : Let combiné avec Izte *)
+  let test3 =
+    Let ("x", Entier 0,
+      Izte (Var "x", Entier 1, Entier 42))
+  in
+  Printf.printf "Test 3 : %s\n" (print_term test3);
+  (match ltr_cbv_norm' test3 100 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+  (* Test 4 : Let combiné avec une définition récursive (Fibonacci avec Fix) *)
+  let fib_functional =
+    Abs ("f",
+      Abs ("n",
+        Izte (Var "n",
+              Entier 0,
+              Izte (Soustraction (Var "n", Entier 1),
+                    Entier 1,
+                    Addition (
+                      App (Var "f", Soustraction (Var "n", Entier 1)),
+                      App (Var "f", Soustraction (Var "n", Entier 2))
+                    )
+              )
+        )
+      )
+    )
+  in
+  let test4 =
+    Let ("fib", Fix fib_functional,
+      App (Var "fib", Entier 5))
+  in
+  Printf.printf "Test 4 : %s\n" (print_term test4);
+  (match ltr_cbv_norm' test4 500 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+  (* Test 5 : Let imbriqué avec des calculs complexes *)
+  let test5 =
+    Let ("x", Entier 2,
+      Let ("y", Addition (Var "x", Entier 3),
+        Let ("z", Soustraction (Var "y", Entier 1),
+          Addition (Var "z", Var "x"))))
+  in
+  Printf.printf "Test 5 : %s\n" (print_term test5);
+  (match ltr_cbv_norm' test5 100 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+
+  (* Test 6 : Let avec une évaluation partielle *)
+  let test6 =
+    Let ("x", Addition (Entier 2, Entier 3),
+      Let ("y", Var "x",
+        Soustraction (Var "y", Entier 1)))
+  in
+  Printf.printf "Test 6 : %s\n" (print_term test6);
+  (match ltr_cbv_norm' test6 100 with
+   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
+   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
