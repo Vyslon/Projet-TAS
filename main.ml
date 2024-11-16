@@ -241,6 +241,106 @@ let nouvelle_var_t () : string =
   compteur_var_t := !compteur_var_t + 1;
   "T" ^ string_of_int !compteur_var_t
 
+(* Récupère toutes les variables de type libres dans un type *)
+let rec variablesTypeLibres (t : ptype) : string list =
+  match t with
+  | TypeVar x -> [x]
+  | Arr (t1, t2) -> (variablesTypeLibres t1) @ (variablesTypeLibres t2)
+  | N -> []
+  | Liste t1 -> variablesTypeLibres t1
+  | Forall (x, t1) -> List.filter (fun y -> y <> x) (variablesTypeLibres t1)
+
+(* Récupère toutes les variables de type libres dans l'environnement *)
+let rec variablesTypeEnv (e : env) : string list =
+  match e with
+  | [] -> []
+  | (_, t)::rest -> (variablesTypeLibres t) @ (variablesTypeEnv rest)
+
+(* Généralise un type *)
+let generaliserType (t : ptype) (e : env) : ptype =
+  let varDansT = variablesTypeLibres t in
+  let varDansEnv = variablesTypeEnv e in
+  let varsAGeneraliser = List.filter (fun v -> not (List.mem v varDansEnv)) varDansT in
+  List.fold_left (fun acc var -> Forall(var, acc)) t varsAGeneraliser
+
+type substitutions = (string * ptype) list
+
+let rec substitutDansType (subst : substitutions) (t : ptype) : ptype =
+  match t with
+  | TypeVar x ->
+      (match List.assoc_opt x subst with
+       | Some ty -> substitutDansType subst ty
+       | None -> t)
+  | Arr (t1, t2) ->
+      Arr (substitutDansType subst t1, substitutDansType subst t2)
+  | N -> N
+  | Liste x -> Liste (substitutDansType subst x)
+  | Forall (x, t_body) ->
+    (* Avoid substituting the bound variable *)
+    let subst_without_x = List.remove_assoc x subst in
+    Forall (x, substitutDansType subst_without_x t_body)
+
+let substitutDansEquation (subst : substitutions) (eqs : eqTypage) : eqTypage =
+  List.map (fun (t1, t2) -> (substitutDansType subst t1, substitutDansType subst t2)) eqs
+
+let rec egStructurelle (t1 : ptype) (t2 : ptype) : bool =
+  match t1, t2 with
+  | (N, N) -> true
+  | (TypeVar x, TypeVar y) -> x = y
+  | (Arr (t1, t2), Arr(t3, t4)) -> (egStructurelle t1 t3) && (egStructurelle t2 t4)
+  | (Liste x, Liste y) -> egStructurelle x y
+  | (_,_) -> false  
+
+(* Vérifie si la variable var apparait dans untype *)
+let rec occurCheck (var : ptype) (unType : ptype) : bool =
+  match var with
+  | TypeVar x ->
+      (match unType with
+      | TypeVar t -> (x = t)
+      | Arr(t1, t2) -> (occurCheck var t1) || (occurCheck var t2)
+      | N -> false
+      | Liste t -> (occurCheck var t)
+      | Forall (x', t') -> 
+        if (x = x') then false (* Même string mais désignant des variables différentes *)
+        else (occurCheck var t')
+      )
+  | _ -> failwith "L'occurCheck ne peut être appelé que sur une variable de type"
+
+let unification_step (equations : eqTypage) (subst : substitutions) : (eqTypage * substitutions) option =
+  match equations with
+  | [] -> None
+  | (t1, t2)::ts ->
+      let t1' = substitutDansType subst t1 in
+      let t2' = substitutDansType subst t2 in
+      if egStructurelle t1' t2' then
+        Some (ts, subst)
+      else
+        match (t1', t2') with
+        | (TypeVar x, t) | (t, TypeVar x) ->
+            if occurCheck (TypeVar x) t then
+              None
+            else
+              let subst' = (x, t)::subst in
+              let ts' = substitutDansEquation [(x, t)] ts in
+              Some (ts', subst')
+        | (Arr (l1, r1), Arr (l2, r2)) ->
+            Some ((l1, l2)::(r1, r2)::ts, subst)
+        | (N, N) -> Some (ts, subst)
+        | (Liste x, Liste t) -> Some ((x, t)::ts, subst)
+        | (Forall (var, t_body), t_other) ->
+          (* Barendregtisation and opening of Forall type *)
+          let fresh_var = nouvelle_var_t () in
+          let t_body_renamed = substitutDansType [(var, TypeVar fresh_var)] t_body in
+          let new_equation = (t_body_renamed, t_other) in
+          Some (new_equation::ts, subst)
+        | (t_other, Forall (var, t_body)) ->
+          (* Barendregtisation and opening of Forall type *)
+          let fresh_var = nouvelle_var_t () in
+          let t_body_renamed = substitutDansType [(var, TypeVar fresh_var)] t_body in
+          let new_equation = (t_other, t_body_renamed) in
+          Some (new_equation::ts, subst)
+        | _ -> None
+
 let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
   match t with
   | Var x ->
@@ -282,65 +382,11 @@ let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
     let tElem = TypeVar (nouvelle_var_t ()) in
     let tListe = Liste tElem in
     (genereTypage cond e tListe) @ (genereTypage consq e cible) @ (genereTypage alt e cible)
+  | Let (x, e1, e2) -> match (inference e1 e) with
+                      | Some t0 -> (genereTypage e2 ((x, (generaliserType t0 e))::e) cible) (* TODO: toujours la même cible ? *)
+                      | None -> failwith "Erreur de typage de let"
 
-let rec occurCheck (var : ptype) (unType : ptype) : bool =
-  match var with
-  | TypeVar x ->
-      (match unType with
-      | TypeVar t -> (x = t)
-      | Arr(t1, t2) -> (occurCheck var t1) || (occurCheck var t2)
-      | N -> false
-      | Liste t -> (occurCheck var t))
-  | _ -> failwith "L'occurCheck ne peut être appelé que sur une variable de type"
-
-let rec egStructurelle (t1 : ptype) (t2 : ptype) : bool =
-  match t1, t2 with
-  | (N, N) -> true
-  | (TypeVar x, TypeVar y) -> x = y
-  | (Arr (t1, t2), Arr(t3, t4)) -> (egStructurelle t1 t3) && (egStructurelle t2 t4)
-  | (Liste x, Liste y) -> egStructurelle x y
-  | (_,_) -> false
-
-type substitutions = (string * ptype) list
-
-let rec substitutDansType (subst : substitutions) (t : ptype) : ptype =
-  match t with
-  | TypeVar x ->
-      (match List.assoc_opt x subst with
-       | Some ty -> substitutDansType subst ty
-       | None -> t)
-  | Arr (t1, t2) ->
-      Arr (substitutDansType subst t1, substitutDansType subst t2)
-  | N -> N
-  | Liste x -> Liste (substitutDansType subst x)
-
-let substitutDansEquation (subst : substitutions) (eqs : eqTypage) : eqTypage =
-  List.map (fun (t1, t2) -> (substitutDansType subst t1, substitutDansType subst t2)) eqs
-
-let unification_step (equations : eqTypage) (subst : substitutions) : (eqTypage * substitutions) option =
-  match equations with
-  | [] -> None
-  | (t1, t2)::ts ->
-      let t1' = substitutDansType subst t1 in
-      let t2' = substitutDansType subst t2 in
-      if egStructurelle t1' t2' then
-        Some (ts, subst)
-      else
-        match (t1', t2') with
-        | (TypeVar x, t) | (t, TypeVar x) ->
-            if occurCheck (TypeVar x) t then
-              None
-            else
-              let subst' = (x, t)::subst in
-              let ts' = substitutDansEquation [(x, t)] ts in
-              Some (ts', subst')
-        | (Arr (l1, r1), Arr (l2, r2)) ->
-            Some ((l1, l2)::(r1, r2)::ts, subst)
-        | (N, N) -> Some (ts, subst)
-        | (Liste x, Liste t) -> Some ((x, t)::ts, subst)
-        | _ -> None
-
-let rec unifie (equations : eqTypage) (subst : substitutions) (fuel : int) : substitutions option =
+and unifie (equations : eqTypage) (subst : substitutions) (fuel : int) : substitutions option =
   if fuel <= 0 then None
   else
     match unification_step equations subst with
@@ -349,7 +395,7 @@ let rec unifie (equations : eqTypage) (subst : substitutions) (fuel : int) : sub
     | Some (nouvEquations, nouvSubstitutions) ->
         unifie nouvEquations nouvSubstitutions (fuel - 1)
 
-let inference (t : pterm) (e : env) : ptype option =
+and inference (t : pterm) (e : env) : ptype option =
   let ta = TypeVar (nouvelle_var_t ()) in
   let systeme = genereTypage t e ta in
   match unifie systeme [] 1000 with
@@ -367,11 +413,10 @@ let print_inference_result term env =
 
 
 
-
 let () =
-  Printf.printf "===== TESTS D'INFERENCE DE TYPE POUR Izte ET Iete =====\n";
+  Printf.printf "===== TESTS D'INFERENCE DE TYPE AVEC LET =====\n";
 
-  (* Fonction pour tester et afficher les résultats *)
+  (* Function to test and display inference results *)
   let test_inference term env description =
     Printf.printf "Test : %s\n" description;
     Printf.printf "Terme : %s\n" (print_term term);
@@ -380,44 +425,52 @@ let () =
     | None -> Printf.printf "Échec de l'inférence de type.\n\n"
   in
 
-  (* Tests pour Izte *)
+  (* Test 1: Simple Let with integer *)
+  let term1 = Let ("x", Entier 5, Addition (Var "x", Entier 10)) in
+  test_inference term1 [] "Let simple avec un entier";
 
-  (* Test 1 : Izte avec condition 0 *)
-  let term1 = Izte (Entier 0, Entier 42, Entier 24) in
-  test_inference term1 [] "Izte avec condition 0 (entiers dans les branches)";
+  (* Test 2: Nested Let with multiple bindings *)
+  let term2 =
+    Let ("x", Entier 5,
+      Let ("y", Soustraction (Var "x", Entier 2),
+        Addition (Var "x", Var "y")))
+  in
+  test_inference term2 [] "Let imbriqué avec plusieurs bindings";
 
-  (* Test 2 : Izte avec condition calculée *)
-  let term2 = Izte (Addition (Entier 1, Entier (-1)), Entier 10, Entier 20) in
-  test_inference term2 [] "Izte avec condition calculée";
+  (* Test 3: Let with a function definition *)
+  let term3 =
+    Let ("f", Abs ("x", Addition (Var "x", Entier 1)),
+      App (Var "f", Entier 10))
+  in
+  test_inference term3 [] "Let avec une définition de fonction";
 
-  (* Test 3 : Izte avec condition et branches abstraites *)
-  let term3 = Izte (Entier 0, Abs ("x", Addition (Var "x", Entier 1)), Abs ("y", Soustraction (Var "y", Entier 2))) in
-  test_inference term3 [] "Izte avec condition 0 et branches abstraites";
+  (* Test 4: Let with polymorphism *)
+  let term4 =
+    Let ("id", Abs ("x", Var "x"),
+      App (Var "id", Entier 42))
+  in
+  test_inference term4 [] "Let avec polymorphisme (id appliqué à un entier)";
 
-  (* Test 4 : Izte avec condition non-entière *)
-  let term4 = Izte (Nil, Entier 1, Entier 2) in
-  test_inference term4 [] "Izte avec condition non-entière (liste)";
+  (* Test 5: Polymorphism with multiple Let bindings *)
+  let term5 =
+    Let ("id", Abs ("x", Var "x"),
+      Let ("y", App (Var "id", Entier 42),
+        App (Var "id", Var "y")))
+  in
+  test_inference term5 [] "Polymorphisme avec plusieurs Let";
 
-  (* Tests pour Iete *)
+  (* Test 7: Let with type mismatch *)
+  let term7 =
+    Let ("x", Entier 5,
+      App (Var "x", Entier 10))
+  in
+  test_inference term7 [] "Let avec une incompatibilité de type";
 
-  (* Test 5 : Iete avec liste vide *)
-  let term5 = Iete (Nil, Entier 1, Entier 0) in
-  test_inference term5 [] "Iete avec liste vide";
-
-  (* Test 6 : Iete avec liste non vide *)
-  let term6 = Iete (Cons (Entier 42, Nil), Entier 1, Entier 0) in
-  test_inference term6 [] "Iete avec liste non vide";
-
-  (* Test 7 : Iete avec liste complexe et branches abstraites *)
-  let term7 = Iete (Cons (Entier 1, Cons (Entier 2, Nil)), Abs ("x", Soustraction (Var "x", Entier 5)), Entier 100) in
-  test_inference term7 [] "Iete avec liste complexe et branches abstraites";
-
-  (* Test 8 : Iete avec liste calculée *)
-  let term8 = Iete (Cons (Addition (Entier 1, Entier 1), Nil), Entier 10, Entier 20) in
-  test_inference term8 [] "Iete avec liste calculée";
-
-  (* Test 9 : Iete avec type mismatch dans les branches *)
-  let term9 = Iete (Cons (Entier 1, Nil), Entier 42, Abs ("x", Var "x")) in
-  test_inference term9 [] "Iete avec mismatch de types entre les branches";
+  (* Test 8: Let with a list and polymorphic operations *)
+  let term8 =
+    Let ("consList", Abs ("x", Abs ("xs", Cons (Var "x", Var "xs"))),
+      App (App (Var "consList", Entier 42), Nil))
+  in
+  test_inference term8 [] "Let avec une liste et des opérations polymorphes";
 
   Printf.printf "===== FIN DES TESTS =====\n";
