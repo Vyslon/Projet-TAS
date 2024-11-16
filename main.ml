@@ -193,7 +193,7 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
     match f with
     | Abs (x, body) -> Some (substitutions x (Fix f) body)
     | _ -> failwith "Fix doit être appliqué à une abstraction")
-  | Let(x, e1, e2) -> Some (substitutions x e1 e2)
+  | Let(x, e1, e2) -> Some (substitutions x e1 e2) (* TODO: on évalue vraiment e1 avant e2 là? *)
 
 (* Appelle consécutivement ltr_ctb_step, pour normaliser un terme autant que possible *)
 let rec ltr_cbv_norm (t : pterm) : pterm =
@@ -211,13 +211,13 @@ let rec ltr_cbv_norm' (t : pterm) (n : int) : pterm option =
 type ptype =
     TypeVar of string
   | Arr of ptype * ptype
-  | Nat
+  | N (* entier *)
 
 let rec print_type (t : ptype) : string =
   match t with
     TypeVar x -> x
   | Arr (t1, t2) -> "(" ^ (print_type t1) ^" -> "^ (print_type t2) ^")"
-  | Nat -> "Nat"
+  | N -> "entier"
 
 type eqTypage = (ptype * ptype) list
 
@@ -250,10 +250,14 @@ let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
       let tr = TypeVar (nouvelle_var_t ()) in
       (cible, Arr(ta, tr)) :: (genereTypage t' ((x, ta) :: e) tr)
   | App(t1, t2) ->
+      let _ = Printf.printf "t1 : %s t2 : %s\n" (print_term t1) (print_term t2) in
       let ta = TypeVar (nouvelle_var_t ()) in
       let t1Sys = genereTypage t1 e (Arr(ta, cible)) in
       let t2Sys = genereTypage t2 e ta in
       t1Sys @ t2Sys
+  | Entier _ -> [(cible, N)]
+  | Addition(x, y) -> (genereTypage x e N) @ (genereTypage y e N) @ [(cible, N)]
+  | Soustraction(x, y) -> (genereTypage x e N) @ (genereTypage y e N) @ [(cible, N)]
 
 (* Vérifie si une variable de type apparaît dans un type *)
 let rec occurCheck (var : ptype) (unType : ptype) : bool =
@@ -262,14 +266,14 @@ let rec occurCheck (var : ptype) (unType : ptype) : bool =
       (match unType with
       | TypeVar t -> (x = t)
       | Arr(t1, t2) -> (occurCheck var t1) || (occurCheck var t2)
-      | Nat -> false
+      | N -> false
       )
   | _ -> failwith "L'occurCheck ne peut être appelé que sur une variable de type"
 
 (* Vérifie l'égalité structurelle entre 2 types *)
 let rec egStructurelle (t1 : ptype) ( t2 : ptype) : bool =
   match t1, t2 with
-  |(Nat, Nat) -> true
+  | (N, N) -> true
   | (TypeVar x, TypeVar y) -> x = y
   | (Arr (t1, t2), Arr(t3, t4)) -> (egStructurelle t1 t3) && (egStructurelle t2 t4)
   | (_,_) -> false
@@ -286,7 +290,7 @@ let rec substitutDansType (subst : substitutions) (t : ptype) : ptype =
        | None -> t)
   | Arr (t1, t2) ->
       Arr (substitutDansType subst t1, substitutDansType subst t2)
-  | Nat -> Nat
+  | N -> N
 
 (* Applique une liste de substitutions *)
 let substitutDansEquation (subst : substitutions) (eqs : eqTypage) : eqTypage =
@@ -312,6 +316,7 @@ let unification_step (equations : eqTypage) (subst : substitutions) : (eqTypage 
               Some (ts', subst')
         | (Arr (l1, r1), Arr (l2, r2)) ->
             Some ((l1, l2)::(r1, r2)::ts, subst)
+        | (N, N) -> Some (ts, subst)
         | _ -> None
 
 (* Réalise l'unification jusqu'à ce qu'on ait épuisé notre fuel ou notre système d'équations *)
@@ -335,92 +340,39 @@ let inference (t : pterm) (e : env) : ptype option =
   | None -> None
 
 (* Fonction pour afficher les résultats de l'inférence de type *)
-let print_inference_result term env typeAttendu =
+let print_inference_result term env =
   Printf.printf "Terme : %s\n" (print_term term);
   match inference term env with
   | Some typeInfere ->
-      Printf.printf "Type inféré : %s\n" (print_type typeInfere);
-      Printf.printf "Type attendu : %s\n\n" typeAttendu
+      Printf.printf "Type inféré : %s\n\n" (print_type typeInfere);
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
 
 
 let () =
-  (* Test 1 : Let avec une simple définition et utilisation *)
-  let test1 =
-    Let ("x", Entier 5, Addition (Var "x", Entier 10))
-  in
-  Printf.printf "Test 1 : %s\n" (print_term test1);
-  (match ltr_cbv_norm' test1 100 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  (* Test 1 : Inférence de type pour un entier *)
+  let term1 = Entier 42 in
+  let env1 = [] in
+  print_inference_result term1 env1;
 
-  (* Test 2 : Let avec un calcul complexe *)
-  let test2 =
-    Let ("x", Addition (Entier 3, Entier 7),
-      Let ("y", Soustraction (Var "x", Entier 5),
-        Addition (Var "x", Var "y")))
-  in
-  Printf.printf "Test 2 : %s\n" (print_term test2);
-  (match ltr_cbv_norm' test2 100 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  (* Test 2 : Inférence de type pour une addition *)
+  let term2 = Addition (Entier 5, Entier 3) in
+  let env2 = [] in
+  print_inference_result term2 env2;
 
-  (* Test 3 : Let combiné avec Izte *)
-  let test3 =
-    Let ("x", Entier 0,
-      Izte (Var "x", Entier 1, Entier 42))
-  in
-  Printf.printf "Test 3 : %s\n" (print_term test3);
-  (match ltr_cbv_norm' test3 100 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  (* Test 3 : Inférence de type pour une soustraction *)
+  let term3 = Soustraction (Entier 10, Entier 4) in
+  let env3 = [] in
+  print_inference_result term3 env3;
 
-  (* Test 4 : Let combiné avec une définition récursive (Fibonacci avec Fix) *)
-  let fib_functional =
-    Abs ("f",
-      Abs ("n",
-        Izte (Var "n",
-              Entier 0,
-              Izte (Soustraction (Var "n", Entier 1),
-                    Entier 1,
-                    Addition (
-                      App (Var "f", Soustraction (Var "n", Entier 1)),
-                      App (Var "f", Soustraction (Var "n", Entier 2))
-                    )
-              )
-        )
-      )
-    )
-  in
-  let test4 =
-    Let ("fib", Fix fib_functional,
-      App (Var "fib", Entier 5))
-  in
-  Printf.printf "Test 4 : %s\n" (print_term test4);
-  (match ltr_cbv_norm' test4 500 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  (* Test 4 : Inférence de type pour une fonction d'addition partielle *)
+  let term4 = Abs ("x", Addition (Var "x", Entier 7)) in
+  let env4 = [] in
+  print_inference_result term4 env4;
 
-  (* Test 5 : Let imbriqué avec des calculs complexes *)
-  let test5 =
-    Let ("x", Entier 2,
-      Let ("y", Addition (Var "x", Entier 3),
-        Let ("z", Soustraction (Var "y", Entier 1),
-          Addition (Var "z", Var "x"))))
-  in
-  Printf.printf "Test 5 : %s\n" (print_term test5);
-  (match ltr_cbv_norm' test5 100 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  (* Test 5 : Inférence de type pour une fonction polymorphe *)
+  let term5 = Abs ("x", Abs ("y", Addition (Var "x", Var "y"))) in
+  let env5 = [] in
+  print_inference_result term5 env5;
 
-  (* Test 6 : Let avec une évaluation partielle *)
-  let test6 =
-    Let ("x", Addition (Entier 2, Entier 3),
-      Let ("y", Var "x",
-        Soustraction (Var "y", Entier 1)))
-  in
-  Printf.printf "Test 6 : %s\n" (print_term test6);
-  (match ltr_cbv_norm' test6 100 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  Printf.printf "Tous les tests d'inférence de type sont terminés.\n";
