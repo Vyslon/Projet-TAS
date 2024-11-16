@@ -3,12 +3,12 @@ type pterm =
   | App of pterm * pterm
   | Abs of string * pterm
   | Entier of int
-  | Addition of pterm * pterm (* : Entier * Entier *)
-  | Soustraction of pterm * pterm (* : Entier * Entier *)
-  | Nil (* Liste vide *)
+  | Addition of pterm * pterm
+  | Soustraction of pterm * pterm
+  | Nil
   | Cons of pterm * pterm
-  | Izte of pterm * pterm * pterm (* : Entier * pterm * pterm *)
-  | Iete of pterm * pterm * pterm (* : Nil | Cons (pterm * pterm) * pterm * pterm *)
+  | Izte of pterm * pterm * pterm
+  | Iete of pterm * pterm * pterm
   | Fix of pterm
   | Let of string * pterm * pterm
   | Head of pterm
@@ -56,8 +56,6 @@ let nouvelle_var () : string =
   compteur_var := !compteur_var + 1;
   "X"^(string_of_int !compteur_var)
 
-(* Donne la liste des variables libres dans le terme t *)
-(* TODO : mettre à jour ? *)
 let rec variablesLibres (t : pterm) : string list =
   match t with
   | Var x -> [x]
@@ -65,7 +63,6 @@ let rec variablesLibres (t : pterm) : string list =
   | Abs (x, t1) -> List.filter (fun y -> y <> x) (variablesLibres t1)
   | _ -> []
 
-(* On remplace dans t chaque occurence de x par n *)
 let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
   match t with
   | Var k -> if (k = x) then n else Var k
@@ -90,7 +87,6 @@ let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
   | Tail ts -> Tail (substitutions x n ts)
   | _ -> t
 
-(* alpha-conversion *)
 let rec alphaconv (t : pterm) : pterm =
   match t with
   | Var x -> Var x
@@ -99,7 +95,6 @@ let rec alphaconv (t : pterm) : pterm =
       Abs (x', alphaconv (substitutions x (Var x') tt))
   | _ -> t
 
-(* Cette fonction détermine si le terme est une valeur ("V" dans le CM 2 p.21) *)
 let rec is_value (t : pterm) : bool =
   match t with
   | Var _ -> true
@@ -112,7 +107,6 @@ let rec is_value (t : pterm) : bool =
   | Tail _ -> true
   | _ -> false
 
-(* Effectue une étape de la stratégie LtR CbV *)
 let rec ltr_ctb_step (t : pterm) : pterm option =
   match t with
   | Var _ -> None
@@ -122,14 +116,14 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
       | None -> None)
   | App(t1, t2) -> (
     match ltr_ctb_step t1 with
-    | Some t1' -> Some (App(t1', t2)) (* Réduire t1 si possible *)
+    | Some t1' -> Some (App(t1', t2))
     | None -> match ltr_ctb_step t2 with
-              | Some t2' -> Some (App(t1, t2')) (* Réduire t2 si possible *)
+              | Some t2' -> Some (App(t1, t2'))
               | None -> (
                   match t1 with
-                  | Abs(str, t') -> Some (substitutions str t2 t') (* Réduire directement l'application *)
-                  | _ -> None)) (* Sinon, pas de réduction possible *)
-  | Entier x -> None (* Déjà une valeur, donc rien à réduire *)
+                  | Abs(str, t') -> Some (substitutions str t2 t')
+                  | _ -> None))
+  | Entier x -> None
   | Addition (x, y) -> (
       match (x, y) with 
       | (Entier i, Entier k) -> Some (Entier (i + k))
@@ -168,7 +162,7 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
   | Cons(x, xs) -> (
     let next = (ltr_ctb_step x) in
     match next with
-    | Some reduction -> Some (Cons (reduction, xs)) (* TODO : lancer le step sur xs ? *)
+    | Some reduction -> Some (Cons (reduction, xs))
     | None -> let nextXS = (ltr_ctb_step xs) in
         match nextXS with
         | Some reductionXS -> Some (Cons(x, reductionXS))
@@ -204,15 +198,13 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
     match f with
     | Abs (x, body) -> Some (substitutions x (Fix f) body)
     | _ -> failwith "Fix doit être appliqué à une abstraction")
-  | Let(x, e1, e2) -> Some (substitutions x e1 e2) (* TODO: on évalue vraiment e1 avant e2 là? *)
+  | Let(x, e1, e2) -> Some (substitutions x e1 e2)
 
-(* Appelle consécutivement ltr_ctb_step, pour normaliser un terme autant que possible *)
 let rec ltr_cbv_norm (t : pterm) : pterm =
   match ltr_ctb_step t with
   | Some t' -> ltr_cbv_norm t'
   | None -> t
 
-(* Cette version prend en compte la divergence grâce à l'utilisation de fuel *)
 let rec ltr_cbv_norm' (t : pterm) (n : int) : pterm option =
   if n = 0 then None else
     match ltr_ctb_step t with
@@ -222,8 +214,9 @@ let rec ltr_cbv_norm' (t : pterm) (n : int) : pterm option =
 type ptype =
     TypeVar of string
   | Arr of ptype * ptype
-  | N (* entier *)
+  | N
   | Liste of ptype
+  | Forall of string * ptype
 
 let rec print_type (t : ptype) : string =
   match t with
@@ -231,60 +224,65 @@ let rec print_type (t : ptype) : string =
   | Arr (t1, t2) -> "(" ^ (print_type t1) ^" -> "^ (print_type t2) ^")"
   | N -> "entier"
   | Liste x -> "Liste " ^ print_type x
+  | Forall (var, t') -> "∀" ^ var ^ ". " ^ print_type t'
 
 type eqTypage = (ptype * ptype) list
 
 type env = (string * ptype) list
 
-let rec getInEnv (e : env) (x : string) : ptype =
+let rec getInEnv (e : env) (x : string) : ptype option =
   match e with
-    [] -> failwith ("Variable non présente dans l'environnement: "^x)
-    | (s,t)::envs when x = s -> t
-    | _::envs -> getInEnv envs x
+  | [] -> None
+  | (s, t) :: envs -> if x = s then Some t else getInEnv envs x
 
 let compteur_var_t : int ref = ref 0
 
-(* Créer une variable de type fraîche *)
 let nouvelle_var_t () : string =
   compteur_var_t := !compteur_var_t + 1;
   "T" ^ string_of_int !compteur_var_t
 
-(* Génère un système d'équations de typage depuis un terme *)
 let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
   match t with
   | Var x ->
-      let typeV = getInEnv e x in
-      [(typeV, cible)]
+      (match getInEnv e x with
+      | Some typeV -> [(cible, typeV)]
+      | None -> failwith "WIP"
+      )
   | Abs(x, t') ->
-      let ta =
-        try getInEnv e x
-        with _ -> TypeVar (nouvelle_var_t ())
+      let ta = match getInEnv e x with
+        | Some t -> t
+        | None -> TypeVar (nouvelle_var_t ())
       in
       let tr = TypeVar (nouvelle_var_t ()) in
-      (cible, Arr(ta, tr)) :: (genereTypage t' ((x, ta) :: e) tr)
-  | App(t1, t2) ->
+      (cible, Arr (ta, tr)) :: (genereTypage t' ((x, ta) :: e) tr)
+  | App (t1, t2) ->
       let ta = TypeVar (nouvelle_var_t ()) in
-      let t1Sys = genereTypage t1 e (Arr(ta, cible)) in
+      let t1Sys = genereTypage t1 e (Arr (ta, cible)) in
       let t2Sys = genereTypage t2 e ta in
       t1Sys @ t2Sys
   | Entier _ -> [(cible, N)]
-  | Addition(x, y) -> (genereTypage x e N) @ (genereTypage y e N) @ [(cible, N)]
-  | Soustraction(x, y) -> (genereTypage x e N) @ (genereTypage y e N) @ [(cible, N)]
+  | Addition (x, y) -> (genereTypage x e N) @ (genereTypage y e N) @ [(cible, N)]
+  | Soustraction (x, y) -> (genereTypage x e N) @ (genereTypage y e N) @ [(cible, N)]
   | Nil -> [(cible, Liste (TypeVar (nouvelle_var_t ())))]
-  | Cons(x, xs) ->
-    let tElem = TypeVar (nouvelle_var_t ()) in
-    let tListe = Liste tElem in
-    (genereTypage x e tElem) @ (genereTypage xs e tListe) @ [(cible, tListe)]
+  | Cons (x, xs) ->
+      let tElem = TypeVar (nouvelle_var_t ()) in
+      let tListe = Liste tElem in
+      (genereTypage x e tElem) @ (genereTypage xs e tListe) @ [(cible, tListe)]
   | Head x ->
-    let tElem = TypeVar (nouvelle_var_t ()) in
-    let tListe = Liste tElem in
-    (genereTypage x e tListe) @ [(cible, tElem)]
+      let tElem = TypeVar (nouvelle_var_t ()) in
+      let tListe = Liste tElem in
+      (genereTypage x e tListe) @ [(cible, tElem)]
   | Tail x ->
+      let tElem = TypeVar (nouvelle_var_t ()) in
+      let tListe = Liste tElem in
+      (genereTypage x e tListe) @ [(cible, tElem)]
+  | Izte (cond, consq, alt) -> (* Environnement généralisé, on ajoute le truc à l'env e *)
+    (genereTypage cond e N) @ (genereTypage consq e cible) @ (genereTypage alt e cible)
+  | Iete (cond, consq, alt) -> (* Environnement généralisé, on ajoute le truc à l'env e *)
     let tElem = TypeVar (nouvelle_var_t ()) in
     let tListe = Liste tElem in
-    (genereTypage x e tListe) @ [(cible, tElem)]
+    (genereTypage cond e tListe) @ (genereTypage consq e cible) @ (genereTypage alt e cible)
 
-(* Vérifie si une variable de type apparaît dans un type *)
 let rec occurCheck (var : ptype) (unType : ptype) : bool =
   match var with
   | TypeVar x ->
@@ -292,12 +290,10 @@ let rec occurCheck (var : ptype) (unType : ptype) : bool =
       | TypeVar t -> (x = t)
       | Arr(t1, t2) -> (occurCheck var t1) || (occurCheck var t2)
       | N -> false
-      | Liste t -> (occurCheck var t)
-      )
+      | Liste t -> (occurCheck var t))
   | _ -> failwith "L'occurCheck ne peut être appelé que sur une variable de type"
 
-(* Vérifie l'égalité structurelle entre 2 types *)
-let rec egStructurelle (t1 : ptype) ( t2 : ptype) : bool =
+let rec egStructurelle (t1 : ptype) (t2 : ptype) : bool =
   match t1, t2 with
   | (N, N) -> true
   | (TypeVar x, TypeVar y) -> x = y
@@ -305,10 +301,8 @@ let rec egStructurelle (t1 : ptype) ( t2 : ptype) : bool =
   | (Liste x, Liste y) -> egStructurelle x y
   | (_,_) -> false
 
-(* Représente une liste de substitutions  *)
 type substitutions = (string * ptype) list
 
-(* Applique une liste de substitutions à un type *)
 let rec substitutDansType (subst : substitutions) (t : ptype) : ptype =
   match t with
   | TypeVar x ->
@@ -320,11 +314,9 @@ let rec substitutDansType (subst : substitutions) (t : ptype) : ptype =
   | N -> N
   | Liste x -> Liste (substitutDansType subst x)
 
-(* Applique une liste de substitutions *)
 let substitutDansEquation (subst : substitutions) (eqs : eqTypage) : eqTypage =
   List.map (fun (t1, t2) -> (substitutDansType subst t1, substitutDansType subst t2)) eqs
 
-(* Applique une étape d'unification *)
 let unification_step (equations : eqTypage) (subst : substitutions) : (eqTypage * substitutions) option =
   match equations with
   | [] -> None
@@ -337,7 +329,7 @@ let unification_step (equations : eqTypage) (subst : substitutions) : (eqTypage 
         match (t1', t2') with
         | (TypeVar x, t) | (t, TypeVar x) ->
             if occurCheck (TypeVar x) t then
-              None (* Problème dans l'unification *)
+              None
             else
               let subst' = (x, t)::subst in
               let ts' = substitutDansEquation [(x, t)] ts in
@@ -348,7 +340,6 @@ let unification_step (equations : eqTypage) (subst : substitutions) : (eqTypage 
         | (Liste x, Liste t) -> Some ((x, t)::ts, subst)
         | _ -> None
 
-(* Réalise l'unification jusqu'à ce qu'on ait épuisé notre fuel ou notre système d'équations *)
 let rec unifie (equations : eqTypage) (subst : substitutions) (fuel : int) : substitutions option =
   if fuel <= 0 then None
   else
@@ -358,7 +349,6 @@ let rec unifie (equations : eqTypage) (subst : substitutions) (fuel : int) : sub
     | Some (nouvEquations, nouvSubstitutions) ->
         unifie nouvEquations nouvSubstitutions (fuel - 1)
 
-(* Infère le type de t si possible *)
 let inference (t : pterm) (e : env) : ptype option =
   let ta = TypeVar (nouvelle_var_t ()) in
   let systeme = genereTypage t e ta in
@@ -368,7 +358,6 @@ let inference (t : pterm) (e : env) : ptype option =
       Some typeInfere
   | None -> None
 
-(* Fonction pour afficher les résultats de l'inférence de type *)
 let print_inference_result term env =
   Printf.printf "Terme : %s\n" (print_term term);
   match inference term env with
@@ -377,82 +366,58 @@ let print_inference_result term env =
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
 
+
+
 let () =
-  (* Test 1 : Let avec une simple définition et utilisation *)
-  let test1 =
-    Let ("x", Entier 5, Addition (Var "x", Entier 10))
-  in
-  Printf.printf "Test 1 : %s\n" (print_term test1);
-  (match ltr_cbv_norm' test1 100 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  Printf.printf "===== TESTS D'INFERENCE DE TYPE POUR Izte ET Iete =====\n";
 
-  (* Test 2 : Let avec un calcul complexe *)
-  let test2 =
-    Let ("x", Addition (Entier 3, Entier 7),
-      Let ("y", Soustraction (Var "x", Entier 5),
-        Addition (Var "x", Var "y")))
+  (* Fonction pour tester et afficher les résultats *)
+  let test_inference term env description =
+    Printf.printf "Test : %s\n" description;
+    Printf.printf "Terme : %s\n" (print_term term);
+    match inference term env with
+    | Some typeInfere -> Printf.printf "Type inféré : %s\n\n" (print_type typeInfere)
+    | None -> Printf.printf "Échec de l'inférence de type.\n\n"
   in
-  Printf.printf "Test 2 : %s\n" (print_term test2);
-  (match ltr_cbv_norm' test2 100 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
 
-  (* Test 3 : Let combiné avec Izte *)
-  let test3 =
-    Let ("x", Entier 0,
-      Izte (Var "x", Entier 1, Entier 42))
-  in
-  Printf.printf "Test 3 : %s\n" (print_term test3);
-  (match ltr_cbv_norm' test3 100 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  (* Tests pour Izte *)
 
-  (* Test 4 : Let combiné avec une définition récursive (Fibonacci avec Fix) *)
-  let fib_functional =
-    Abs ("f",
-      Abs ("n",
-        Izte (Var "n",
-              Entier 0,
-              Izte (Soustraction (Var "n", Entier 1),
-                    Entier 1,
-                    Addition (
-                      App (Var "f", Soustraction (Var "n", Entier 1)),
-                      App (Var "f", Soustraction (Var "n", Entier 2))
-                    )
-              )
-        )
-      )
-    )
-  in
-  let test4 =
-    Let ("fib", Fix fib_functional,
-      App (Var "fib", Entier 5))
-  in
-  Printf.printf "Test 4 : %s\n" (print_term test4);
-  (match ltr_cbv_norm' test4 500 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  (* Test 1 : Izte avec condition 0 *)
+  let term1 = Izte (Entier 0, Entier 42, Entier 24) in
+  test_inference term1 [] "Izte avec condition 0 (entiers dans les branches)";
 
-  (* Test 5 : Let imbriqué avec des calculs complexes *)
-  let test5 =
-    Let ("x", Entier 2,
-      Let ("y", Addition (Var "x", Entier 3),
-        Let ("z", Soustraction (Var "y", Entier 1),
-          Addition (Var "z", Var "x"))))
-  in
-  Printf.printf "Test 5 : %s\n" (print_term test5);
-  (match ltr_cbv_norm' test5 100 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  (* Test 2 : Izte avec condition calculée *)
+  let term2 = Izte (Addition (Entier 1, Entier (-1)), Entier 10, Entier 20) in
+  test_inference term2 [] "Izte avec condition calculée";
 
-  (* Test 6 : Let avec une évaluation partielle *)
-  let test6 =
-    Let ("x", Addition (Entier 2, Entier 3),
-      Let ("y", Var "x",
-        Soustraction (Var "y", Entier 1)))
-  in
-  Printf.printf "Test 6 : %s\n" (print_term test6);
-  (match ltr_cbv_norm' test6 100 with
-   | Some result -> Printf.printf "Résultat : %s\n\n" (print_term result)
-   | None -> Printf.printf "Évaluation interrompue (divergence possible).\n\n");
+  (* Test 3 : Izte avec condition et branches abstraites *)
+  let term3 = Izte (Entier 0, Abs ("x", Addition (Var "x", Entier 1)), Abs ("y", Soustraction (Var "y", Entier 2))) in
+  test_inference term3 [] "Izte avec condition 0 et branches abstraites";
+
+  (* Test 4 : Izte avec condition non-entière *)
+  let term4 = Izte (Nil, Entier 1, Entier 2) in
+  test_inference term4 [] "Izte avec condition non-entière (liste)";
+
+  (* Tests pour Iete *)
+
+  (* Test 5 : Iete avec liste vide *)
+  let term5 = Iete (Nil, Entier 1, Entier 0) in
+  test_inference term5 [] "Iete avec liste vide";
+
+  (* Test 6 : Iete avec liste non vide *)
+  let term6 = Iete (Cons (Entier 42, Nil), Entier 1, Entier 0) in
+  test_inference term6 [] "Iete avec liste non vide";
+
+  (* Test 7 : Iete avec liste complexe et branches abstraites *)
+  let term7 = Iete (Cons (Entier 1, Cons (Entier 2, Nil)), Abs ("x", Soustraction (Var "x", Entier 5)), Entier 100) in
+  test_inference term7 [] "Iete avec liste complexe et branches abstraites";
+
+  (* Test 8 : Iete avec liste calculée *)
+  let term8 = Iete (Cons (Addition (Entier 1, Entier 1), Nil), Entier 10, Entier 20) in
+  test_inference term8 [] "Iete avec liste calculée";
+
+  (* Test 9 : Iete avec type mismatch dans les branches *)
+  let term9 = Iete (Cons (Entier 1, Nil), Entier 42, Abs ("x", Var "x")) in
+  test_inference term9 [] "Iete avec mismatch de types entre les branches";
+
+  Printf.printf "===== FIN DES TESTS =====\n";
