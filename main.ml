@@ -13,13 +13,10 @@ type pterm =
   | Let of string * pterm * pterm
   | Head of pterm
   | Tail of pterm
-
-let is_empty (liste : pterm) : bool = 
-  (liste = Nil)
-
-let is_liste (t : pterm) : bool =
-  match t with
-  | _ -> failwith "TODO"
+  | Unit
+  | Deref of pterm
+  | Ref of pterm
+  | Assign of pterm * pterm
 
 let rec print_term (t : pterm) : string =
   match t with
@@ -49,6 +46,10 @@ let rec print_term (t : pterm) : string =
   | Let (x, e1, e2) -> "let " ^ x ^ " = " ^ print_term e1 ^ " in (" ^ print_term e2 ^ ")"
   | Head x -> "head " ^ print_term x
   | Tail x -> "tail " ^ print_term x
+  | Unit -> "()"
+  | Deref e -> "!(" ^ print_term e ^ ")"
+  | Ref e -> "ref " ^ print_term e
+  | Assign (e1, e2)  -> print_term e1 ^ " := " ^ print_term e2
 
 let compteur_var : int ref = ref 0
 
@@ -85,8 +86,12 @@ let rec substitutions (x : string) (n: pterm) (t : pterm) : pterm =
   | Let (k, e1, e2) -> Let(k, (substitutions x n e1), (substitutions x n e2))
   | Head ts -> Head (substitutions x n ts)
   | Tail ts -> Tail (substitutions x n ts)
+  | Deref e -> Deref (substitutions x n e)
+  | Ref e -> Ref (substitutions x n e)
+  | Assign (e1, e2) -> Assign (substitutions x n e1, substitutions x n e2)
   | _ -> t
 
+(* Alpha-conversion (inutilisée) *)
 let rec alphaconv (t : pterm) : pterm =
   match t with
   | Var x -> Var x
@@ -106,6 +111,28 @@ let rec is_value (t : pterm) : bool =
   | Head _ -> true
   | Tail _ -> true
   | _ -> false
+
+type memoire = (string * pterm) list
+
+let regions : memoire ref = ref []
+
+(* 
+let compteur_region : int ref = ref 0
+
+let nouvelle_region () : int =
+  compteur_region := !compteur_region + 1;
+  compteur_region *)
+
+let ajoutMemoire (id : string) (value : pterm) : unit =
+  regions := (id, value) :: !regions
+
+let recupererMemoire (region : string) : pterm =
+  match List.assoc_opt region !regions with
+  | Some value -> value
+  | None -> failwith "region introuvable"
+
+let rec modifierMemoire (region : string) (value : pterm) : unit =
+  regions := List.map (fun (r, v) -> if r = region then (r, value) else (r, v)) !regions  
 
 let rec ltr_ctb_step (t : pterm) : pterm option =
   match t with
@@ -198,7 +225,42 @@ let rec ltr_ctb_step (t : pterm) : pterm option =
     match f with
     | Abs (x, body) -> Some (substitutions x (Fix f) body)
     | _ -> failwith "Fix doit être appliqué à une abstraction")
-  | Let(x, e1, e2) -> Some (substitutions x e1 e2)
+  | Let(x, e1, e2) -> (
+    match ltr_ctb_step e1 with
+    | Some e1' -> Some (Let(x, e1', e2))
+    | None -> (ltr_ctb_step (substitutions x e1 e2)))
+  | Unit -> None
+  | Deref e -> (
+      match ltr_ctb_step e with
+      | Some e' -> Some (Deref e')
+      | None -> (
+          match e with
+          | Var rho -> Some (recupererMemoire rho)
+          | _ -> failwith "Tentative de déréférencement sur un terme invalide.")
+  )
+  | Ref e -> (
+    match ltr_ctb_step e with
+    | Some e' -> Some (Ref e')
+    | None -> 
+      let rho = nouvelle_var () in
+      ajoutMemoire rho e;
+      Some (Var rho))
+  | Assign (e1, e2) -> (
+    match ltr_ctb_step e1 with
+    | Some e1' -> Some (Assign (e1', e2))
+    | None -> (
+      match ltr_ctb_step e2 with
+      | Some e2' -> Some (Assign (e1, e2'))
+      | None -> (
+        match e1 with 
+        | Var rho -> 
+          (modifierMemoire rho e2);
+          Some Unit
+        | _ -> failwith "e1 n'est pas une région initialisée"
+      )
+    )
+  )
+
 
 let rec ltr_cbv_norm (t : pterm) : pterm =
   match ltr_ctb_step t with
@@ -411,66 +473,3 @@ let print_inference_result term env =
       Printf.printf "Type inféré : %s\n\n" (print_type typeInfere);
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
-
-
-let () =
-  Printf.printf "===== TESTS D'INFERENCE DE TYPE AVEC LET =====\n";
-
-  (* Function to test and display inference results *)
-  let test_inference term env description =
-    Printf.printf "Test : %s\n" description;
-    Printf.printf "Terme : %s\n" (print_term term);
-    match inference term env with
-    | Some typeInfere -> Printf.printf "Type inféré : %s\n\n" (print_type typeInfere)
-    | None -> Printf.printf "Échec de l'inférence de type.\n\n"
-  in
-
-  (* Test 1: Simple Let with integer *)
-  let term1 = Let ("x", Entier 5, Addition (Var "x", Entier 10)) in
-  test_inference term1 [] "Let simple avec un entier";
-
-  (* Test 2: Nested Let with multiple bindings *)
-  let term2 =
-    Let ("x", Entier 5,
-      Let ("y", Soustraction (Var "x", Entier 2),
-        Addition (Var "x", Var "y")))
-  in
-  test_inference term2 [] "Let imbriqué avec plusieurs bindings";
-
-  (* Test 3: Let with a function definition *)
-  let term3 =
-    Let ("f", Abs ("x", Addition (Var "x", Entier 1)),
-      App (Var "f", Entier 10))
-  in
-  test_inference term3 [] "Let avec une définition de fonction";
-
-  (* Test 4: Let with polymorphism *)
-  let term4 =
-    Let ("id", Abs ("x", Var "x"),
-      App (Var "id", Entier 42))
-  in
-  test_inference term4 [] "Let avec polymorphisme (id appliqué à un entier)";
-
-  (* Test 5: Polymorphism with multiple Let bindings *)
-  let term5 =
-    Let ("id", Abs ("x", Var "x"),
-      Let ("y", App (Var "id", Entier 42),
-        App (Var "id", Var "y")))
-  in
-  test_inference term5 [] "Polymorphisme avec plusieurs Let";
-
-  (* Test 7: Let with type mismatch *)
-  let term7 =
-    Let ("x", Entier 5,
-      App (Var "x", Entier 10))
-  in
-  test_inference term7 [] "Let avec une incompatibilité de type";
-
-  (* Test 8: Let with a list and polymorphic operations *)
-  let term8 =
-    Let ("consList", Abs ("x", Abs ("xs", Cons (Var "x", Var "xs"))),
-      App (App (Var "consList", Entier 42), Nil))
-  in
-  test_inference term8 [] "Let avec une liste et des opérations polymorphes";
-
-  Printf.printf "===== FIN DES TESTS =====\n";

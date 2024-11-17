@@ -169,3 +169,67 @@ let () =
   print_inference_result term15 env15;
 
   Printf.printf "===== FIN DES TESTS =====\n";
+
+
+(* Tests inférence avec let *)
+let () =
+  Printf.printf "===== TESTS D'INFERENCE DE TYPE AVEC LET =====\n";
+
+  (* Function to test and display inference results *)
+  let test_inference term env description =
+    Printf.printf "Test : %s\n" description;
+    Printf.printf "Terme : %s\n" (print_term term);
+    match inference term env with
+    | Some typeInfere -> Printf.printf "Type inféré : %s\n\n" (print_type typeInfere)
+    | None -> Printf.printf "Échec de l'inférence de type.\n\n"
+  in
+
+  (* Test 1: Simple Let with integer *)
+  let term1 = Let ("x", Entier 5, Addition (Var "x", Entier 10)) in
+  test_inference term1 [] "Let simple avec un entier";
+
+  (* Test 2: Nested Let with multiple bindings *)
+  let term2 =
+    Let ("x", Entier 5,
+      Let ("y", Soustraction (Var "x", Entier 2),
+        Addition (Var "x", Var "y")))
+  in
+  test_inference term2 [] "Let imbriqué avec plusieurs bindings";
+
+  (* Test 3: Let with a function definition *)
+  let term3 =
+    Let ("f", Abs ("x", Addition (Var "x", Entier 1)),
+      App (Var "f", Entier 10))
+  in
+  test_inference term3 [] "Let avec une définition de fonction";
+
+  (* Test 4: Let with polymorphism *)
+  let term4 =
+    Let ("id", Abs ("x", Var "x"),
+      App (Var "id", Entier 42))
+  in
+  test_inference term4 [] "Let avec polymorphisme (id appliqué à un entier)";
+
+  (* Test 5: Polymorphism with multiple Let bindings *)
+  let term5 =
+    Let ("id", Abs ("x", Var "x"),
+      Let ("y", App (Var "id", Entier 42),
+        App (Var "id", Var "y")))
+  in
+  test_inference term5 [] "Polymorphisme avec plusieurs Let";
+
+  (* Test 7: Let with type mismatch *)
+  let term7 =
+    Let ("x", Entier 5,
+      App (Var "x", Entier 10))
+  in
+  test_inference term7 [] "Let avec une incompatibilité de type";
+
+  (* Test 8: Let with a list and polymorphic operations *)
+  let term8 =
+    Let ("consList", Abs ("x", Abs ("xs", Cons (Var "x", Var "xs"))),
+      App (App (Var "consList", Entier 42), Nil))
+  in
+  test_inference term8 [] "Let avec une liste et des opérations polymorphes";
+
+  Printf.printf "===== FIN DES TESTS =====\n";

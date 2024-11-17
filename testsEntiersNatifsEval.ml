@@ -312,3 +312,86 @@ let () =
  
    Printf.printf "===== FIN DES TESTS =====\n";
  
+(* Tests évaluation unit, ref, deref et assign *)
+let () =
+  Printf.printf "===== TESTS D'EVALUATION POUR Unit, Ref, Deref ET Assign =====\n\n";
+
+  (* Fonction pour réinitialiser la mémoire *)
+  let reset_regions () =
+    regions := []
+  in
+
+  (* Fonction pour tester une évaluation et afficher les résultats *)
+  let test_evaluation term n_steps description =
+    Printf.printf "=== Test : %s ===\n" description;
+    Printf.printf "Terme initial : %s\n" (print_term term);
+    match ltr_cbv_norm' term n_steps with
+    | Some result ->
+        Printf.printf "Terme après %d étapes : %s\n" n_steps (print_term result);
+        Printf.printf "Mémoire actuelle : [ %s ]\n\n"
+          (String.concat "; " (List.map (fun (id, value) -> id ^ " -> " ^ print_term value) !regions))
+    | None ->
+        Printf.printf "Le terme n'a pas pu être évalué en %d étapes.\n" n_steps;
+        Printf.printf "Mémoire actuelle : [ %s ]\n\n"
+          (String.concat "; " (List.map (fun (id, value) -> id ^ " -> " ^ print_term value) !regions));
+    reset_regions () (* Réinitialiser la mémoire après chaque test *)
+  in
+
+  (* Test 1: Evaluation de Unit *)
+  reset_regions ();
+  let term1 = Unit in
+  test_evaluation term1 1 "Evaluation de Unit";
+
+  (* Test 2: Evaluation de Ref *)
+  reset_regions ();
+  let term2 = Ref (Entier 42) in
+  test_evaluation term2 5 "Création d'une référence (Ref 42)";
+
+  (* Test 3: Evaluation de Deref *)
+  reset_regions ();
+  let rho1 = nouvelle_var () in
+  ajoutMemoire rho1 (Entier 100); (* On simule une région mémoire avec la valeur 100 *)
+  let term3 = Deref (Var rho1) in
+  test_evaluation term3 5 ("Déréférencement de la région " ^ rho1 ^ " contenant 100");
+
+  (* Test 4: Assignation *)
+  reset_regions ();
+  let rho1 = nouvelle_var () in
+  ajoutMemoire rho1 (Entier 100);
+  let term4 = Assign (Var rho1, Entier 200) in
+  test_evaluation term4 5 ("Assignation de 200 à la région " ^ rho1);
+
+  (* Test 5: Ref et Deref combinés *)
+  reset_regions ();
+  let term5 = Deref (Ref (Entier 500)) in
+  test_evaluation term5 10 "Création d'une référence (Ref 500) suivie d'un déréférencement";
+
+  (* Test 6: Combinaison complexe - Ref, Deref, et Assign *)
+  reset_regions ();
+  let term6 =
+    Let ("x", Ref (Entier 10),
+      Let ("_", Assign (Var "x", Entier 20),
+        Deref (Var "x")))
+  in
+  test_evaluation term6 15 "Combinaison : Ref 10 -> Assign 20 -> Deref";
+
+  (* Test 7: Création et manipulation de plusieurs références *)
+  reset_regions ();
+  let term7 =
+    Let ("r1", Ref (Entier 30),
+      Let ("r2", Ref (Entier 40),
+        Let ("_", Assign (Var "r1", Entier 50),
+          Addition (Deref (Var "r1"), Deref (Var "r2")))))
+  in
+  test_evaluation term7 20 "Manipulation de plusieurs références (r1 et r2)";
+
+  (* Test 8: Evaluation imbriquée avec listes et références *)
+  reset_regions ();
+  let term8 =
+    Let ("list_ref", Ref (Cons (Entier 1, Cons (Entier 2, Nil))),
+      Let ("_", Assign (Var "list_ref", Cons (Entier 3, Nil)),
+        Deref (Var "list_ref")))
+  in
+  test_evaluation term8 20 "Création et modification d'une liste dans une référence";
+
+  Printf.printf "===== FIN DES TESTS =====\n";
