@@ -1,3 +1,4 @@
+(* Tests partie 3 *)
 let () =
   (* 1. Identité *)
   let id_term = Abs ("x", Var "x") in
@@ -302,5 +303,46 @@ let () =
         Deref (Deref (Var "outer_ref"))))
   in
   test_inference term9 [] "Références imbriquées avec Assign et Deref";
+
+  Printf.printf "===== FIN DES TESTS =====\n";
+
+(* Tests inférence point fixe *)
+let () =
+  Printf.printf "===== TESTS D'INFERENCE DE TYPE AVEC LE COMBINAISON FIX =====\n\n";
+
+  (* Fonction pour tester l'inférence de type et afficher les résultats *)
+  let test_inference term env description =
+    Printf.printf "=== Test : %s ===\n" description;
+    Printf.printf "Terme : %s\n" (print_term term);
+    match inference term env with
+    | Some typeInfere -> Printf.printf "Type inféré : %s\n\n" (print_type typeInfere)
+    | None -> Printf.printf "Échec de l'inférence de type.\n\n"
+  in
+
+  (* Test 1: Fix combiné avec un entier *)
+  let term1 = Fix (Abs ("x", Addition (Var "x", Entier 1))) in
+  test_inference term1 [] "Fix combiné avec une addition";
+
+  (* Test 1: Factorielle *)
+  let term1 = 
+    Fix (Abs ("fact", Abs ("n", 
+      Izte (Var "n", 
+            Entier 1, 
+            Addition (Var "n", App (Var "fact", Soustraction (Var "n", Entier 1)))))))
+  in
+  test_inference term1 [] "Factorielle avec Fix";
+
+  (* Test 2: Fibonacci *)
+  let term2 = 
+    Fix (Abs ("fib", Abs ("n",
+      Izte (Var "n", 
+            Entier 0, 
+            Izte (Soustraction (Var "n", Entier 1),
+                  Entier 1,
+                  Addition (
+                    App (Var "fib", Soustraction (Var "n", Entier 1)),
+                    App (Var "fib", Soustraction (Var "n", Entier 2))))))))
+  in
+  test_inference term2 [] "Fibonacci avec Fix";
 
   Printf.printf "===== FIN DES TESTS =====\n";

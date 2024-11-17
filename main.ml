@@ -393,18 +393,16 @@ let unification_step (equations : eqTypage) (subst : substitutions) : (eqTypage 
             Some ((l1, l2)::(r1, r2)::ts, subst)
         | (N, N) -> Some (ts, subst)
         | (Liste x, Liste t) -> Some ((x, t)::ts, subst)
-        | (Forall (var, t_body), t_other) ->
-          (* Barendregtisation and opening of Forall type *)
-          let fresh_var = nouvelle_var_t () in
-          let t_body_renamed = substitutDansType [(var, TypeVar fresh_var)] t_body in
-          let new_equation = (t_body_renamed, t_other) in
-          Some (new_equation::ts, subst)
-        | (t_other, Forall (var, t_body)) ->
-          (* Barendregtisation and opening of Forall type *)
-          let fresh_var = nouvelle_var_t () in
-          let t_body_renamed = substitutDansType [(var, TypeVar fresh_var)] t_body in
-          let new_equation = (t_other, t_body_renamed) in
-          Some (new_equation::ts, subst)
+        | (Forall (var, corps), t) ->
+          let nouvVar = nouvelle_var_t () in
+          let corpsRenomme = substitutDansType [(var, TypeVar nouvVar)] corps in
+          let nouvEquation = (corpsRenomme, t) in
+          Some (nouvEquation::ts, subst)
+        | (t, Forall (var, corps)) ->
+          let nouvVar = nouvelle_var_t () in
+          let corpsRenomme = substitutDansType [(var, TypeVar nouvVar)] corps in
+          let nouvEquation = (t, corpsRenomme) in
+          Some (nouvEquation::ts, subst)
         | (UnitType, UnitType) -> Some (ts, subst)
         | (RefType x, RefType t) -> Some ((x, t)::ts, subst)
         | _ -> None
@@ -444,14 +442,14 @@ let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
       let tElem = TypeVar (nouvelle_var_t ()) in
       let tListe = Liste tElem in
       (genereTypage x e tListe) @ [(cible, tElem)]
-  | Izte (cond, consq, alt) -> (* Environnement généralisé, on ajoute le truc à l'env e *)
+  | Izte (cond, consq, alt) ->
     (genereTypage cond e N) @ (genereTypage consq e cible) @ (genereTypage alt e cible)
-  | Iete (cond, consq, alt) -> (* Environnement généralisé, on ajoute le truc à l'env e *)
+  | Iete (cond, consq, alt) ->
     let tElem = TypeVar (nouvelle_var_t ()) in
     let tListe = Liste tElem in
     (genereTypage cond e tListe) @ (genereTypage consq e cible) @ (genereTypage alt e cible)
   | Let (x, e1, e2) -> (match (inference e1 e) with
-                      | Some t0 -> (genereTypage e2 ((x, (generaliserType t0 e))::e) cible) (* TODO: toujours la même cible ? *)
+                      | Some t0 -> (genereTypage e2 ((x, (generaliserType t0 e))::e) cible)
                       | None -> failwith "Erreur de typage de let")
   | Unit -> [(cible, UnitType)]
   | Deref x -> (match (inference x e) with
@@ -463,7 +461,10 @@ let rec genereTypage (t : pterm) (e : env) (cible : ptype) : eqTypage =
   | Assign (x, y) -> (match (inference y e) with
     | Some t0 -> (genereTypage x e (RefType(t0))) @ [(cible, UnitType)]
     | None -> failwith "Erreur de typage de Assign")
-  (* TODO : Utiliser les fonctions qui accèdent à la mémoire ? *)
+  | Fix t' ->
+    let ta = TypeVar (nouvelle_var_t ()) in
+    let tSys = genereTypage t' e (Arr (ta, ta)) in
+    (cible, ta) :: tSys
 
 and unifie (equations : eqTypage) (subst : substitutions) (fuel : int) : substitutions option =
   if fuel <= 0 then None
@@ -490,74 +491,3 @@ let print_inference_result term env =
       Printf.printf "Type inféré : %s\n\n" (print_type typeInfere);
   | None -> Printf.printf "Le terme n'est pas typable ou l'unification a échoué.\n\n"
 
-
-
-let () =
-  Printf.printf "===== TESTS D'INFERENCE DE TYPE POUR Unit, Ref, Deref ET Assign =====\n\n";
-
-  (* Fonction pour tester l'inférence de type et afficher les résultats *)
-  let test_inference term env description =
-    Printf.printf "=== Test : %s ===\n" description;
-    Printf.printf "Terme : %s\n" (print_term term);
-    match inference term env with
-    | Some typeInfere -> Printf.printf "Type inféré : %s\n\n" (print_type typeInfere)
-    | None -> Printf.printf "Échec de l'inférence de type.\n\n"
-  in
-
-  (* Test 1: Inférence sur Unit *)
-  let term1 = Unit in
-  test_inference term1 [] "Inférence sur Unit";
-
-  (* Test 2: Inférence sur Ref *)
-  let term2 = Ref (Entier 42) in
-  test_inference term2 [] "Inférence sur Ref avec un entier";
-
-  (* Test 3: Inférence sur Deref *)
-  let term3 = Deref (Ref (Entier 100)) in
-  test_inference term3 [] "Inférence sur Deref après Ref";
-
-  (* Test 4: Inférence sur Assign *)
-  let term4 = Assign (Ref (Entier 50), Entier 200) in
-  test_inference term4 [] "Inférence sur Assign";
-
-  (* Test 5: Inférence avec Let combiné avec Ref, Deref et Assign *)
-  let term5 =
-    Let ("x", Ref (Entier 10),
-      Let ("_", Assign (Var "x", Entier 20),
-        Deref (Var "x")))
-  in
-  test_inference term5 [] "Let combiné avec Ref, Assign et Deref";
-
-  (* Test 6: Inférence avec plusieurs références *)
-  let term6 =
-    Let ("r1", Ref (Entier 30),
-      Let ("r2", Ref (Entier 40),
-        Let ("_", Assign (Var "r1", Entier 50),
-          Addition (Deref (Var "r1"), Deref (Var "r2")))))
-  in
-  test_inference term6 [] "Let avec plusieurs références et opérations";
-
-  (* Test 7: Inférence avec une liste de références *)
-  let term7 =
-    Let ("list_ref", Ref (Cons (Entier 1, Cons (Entier 2, Nil))),
-      Let ("_", Assign (Var "list_ref", Cons (Entier 3, Nil)),
-        Deref (Var "list_ref")))
-  in
-  test_inference term7 [] "Liste de références combinée avec Assign et Deref";
-
-  (* Test 8: Inférence polymorphique avec Ref *)
-  let term8 =
-    Let ("id_ref", Abs ("x", Ref (Var "x")),
-      App (Var "id_ref", Entier 42))
-  in
-  test_inference term8 [] "Fonction polymorphe créant une référence";
-
-  (* Test 9: Inférence avec des références imbriquées *)
-  let term9 =
-    Let ("outer_ref", Ref (Ref (Entier 99)),
-      Let ("_", Assign (Deref (Var "outer_ref"), Entier 100),
-        Deref (Deref (Var "outer_ref"))))
-  in
-  test_inference term9 [] "Références imbriquées avec Assign et Deref";
-
-  Printf.printf "===== FIN DES TESTS =====\n";
